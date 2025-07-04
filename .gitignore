@@ -1,0 +1,37 @@
+# --- Go build artifacts ---
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+bin/
+pkg/
+
+# --- Dependencies / Workspace ---
+vendor/
+go.work
+
+# --- IDEs and editors ---
+.vscode/
+.idea/
+*.iml
+*.swp
+*~
+*.log
+
+# --- OS files ---
+.DS_Store
+Thumbs.db
+
+# --- Env & secrets ---
+.env
+*.env
+*.pem
+*.key
+
+
+# --- Configuration files & API-List ---
+configuration.yaml
+openapi/api_list.yaml
