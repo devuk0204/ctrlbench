@@ -161,36 +161,60 @@ func (e *APIExecutor) populateHeaders(execInfo *types.APIExecutionInfo, targetNF
 	// Add NF-specific headers from configuration
 	userInputs, ok := config["user_inputs"].(map[string]interface{})
 	if !ok {
+		fmt.Printf("🔍 DEBUG: No user_inputs found in configuration\n")
 		return
 	}
 
 	nfSettings, ok := userInputs["nf_settings"].(map[string]interface{})
 	if !ok {
+		fmt.Printf("🔍 DEBUG: No nf_settings found in configuration\n")
 		return
 	}
 
+	fmt.Printf("🔍 DEBUG: Looking for NF settings for: %s\n", targetNF)
+
 	if nfConfig, exists := nfSettings[targetNF]; exists {
+		fmt.Printf("🔍 DEBUG: Found NF config for %s\n", targetNF)
+
 		if nfMap, ok := nfConfig.(map[string]interface{}); ok {
 			if customHeaders, exists := nfMap["custom_headers"]; exists {
+				fmt.Printf("🔍 DEBUG: Found custom_headers section\n")
+
 				if headersMap, ok := customHeaders.(map[string]interface{}); ok {
 					for key, value := range headersMap {
 						var headerValue string
+
+						// Handle new configuration format: {value: "..."}
 						if valueMap, ok := value.(map[string]interface{}); ok {
 							if val, exists := valueMap["value"]; exists {
 								headerValue = fmt.Sprintf("%v", val)
 							}
 						} else {
+							// Handle direct string value
 							headerValue = fmt.Sprintf("%v", value)
 						}
 
 						if headerValue != "" {
+							fmt.Printf("🔍 DEBUG: Setting header %s: %s\n", key, headerValue)
 							execInfo.Headers[key] = headerValue
+						} else {
+							fmt.Printf("🔍 DEBUG: Skipping empty header: %s\n", key)
 						}
 					}
+				} else {
+					fmt.Printf("🔍 DEBUG: custom_headers is not a map\n")
 				}
+			} else {
+				fmt.Printf("🔍 DEBUG: No custom_headers found for %s\n", targetNF)
 			}
+		} else {
+			fmt.Printf("🔍 DEBUG: NF config is not a map\n")
 		}
+	} else {
+		fmt.Printf("🔍 DEBUG: No configuration found for NF: %s\n", targetNF)
 	}
+
+	fmt.Printf("🔍 DEBUG: Final headers: %v\n", execInfo.Headers)
 }
 
 // ExecuteHTTPCall performs the actual HTTP call
@@ -219,23 +243,28 @@ func (e *APIExecutor) ExecuteHTTPCall(execInfo *types.APIExecutionInfo) (time.Du
 		return 0, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// Add headers
+	// Add headers from execInfo
+	fmt.Printf("🔍 DEBUG: Adding headers to request:\n")
 	for key, value := range execInfo.Headers {
 		req.Header.Set(key, value)
+		fmt.Printf("   %s: %s\n", key, value)
 	}
 
-	// Debug: Print request headers
-	fmt.Printf("🔍 DEBUG: Request Headers:\n")
+	// Debug: Print all request headers (including any defaults added by Go)
+	fmt.Printf("🔍 DEBUG: Final request headers:\n")
 	for key, values := range req.Header {
 		for _, value := range values {
 			fmt.Printf("   %s: %s\n", key, value)
 		}
 	}
 
+	fmt.Printf("🔍 DEBUG: Making %s request to: %s\n", execInfo.Method, fullURL)
+
 	// Execute request
 	client := &http.Client{Timeout: e.Timeout}
 	resp, err := client.Do(req)
 	if err != nil {
+		fmt.Printf("🔍 DEBUG: Request failed with error: %v\n", err)
 		return time.Since(start), fmt.Errorf("HTTP request failed: %w", err)
 	}
 	defer resp.Body.Close()
@@ -243,7 +272,7 @@ func (e *APIExecutor) ExecuteHTTPCall(execInfo *types.APIExecutionInfo) (time.Du
 	duration := time.Since(start)
 
 	// Debug: Print response status and headers
-	fmt.Printf("🔍 DEBUG: Response Status: %s\n", resp.Status)
+	fmt.Printf("🔍 DEBUG: Response Status: %s (%d)\n", resp.Status, resp.StatusCode)
 	fmt.Printf("🔍 DEBUG: Response Headers:\n")
 	for key, values := range resp.Header {
 		for _, value := range values {
@@ -254,19 +283,22 @@ func (e *APIExecutor) ExecuteHTTPCall(execInfo *types.APIExecutionInfo) (time.Du
 	// Read response body
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
+		fmt.Printf("🔍 DEBUG: Failed to read response body: %v\n", err)
 		return duration, fmt.Errorf("failed to read response body: %w", err)
 	}
 
 	// Debug: Print response body
 	if len(body) > 0 {
-		fmt.Printf("🔍 DEBUG: Response Body: %s\n", string(body))
+		fmt.Printf("🔍 DEBUG: Response Body (raw): %s\n", string(body))
 
 		// Try to format JSON response for better readability
 		var jsonData interface{}
 		if err := json.Unmarshal(body, &jsonData); err == nil {
 			if prettyJSON, err := json.MarshalIndent(jsonData, "", "  "); err == nil {
-				fmt.Printf("🔍 DEBUG: Formatted Response:\n%s\n", string(prettyJSON))
+				fmt.Printf("🔍 DEBUG: Response Body (formatted):\n%s\n", string(prettyJSON))
 			}
+		} else {
+			fmt.Printf("🔍 DEBUG: Response is not valid JSON: %v\n", err)
 		}
 	} else {
 		fmt.Printf("🔍 DEBUG: Empty response body\n")
@@ -274,9 +306,11 @@ func (e *APIExecutor) ExecuteHTTPCall(execInfo *types.APIExecutionInfo) (time.Du
 
 	// Check response status
 	if resp.StatusCode >= 400 {
+		fmt.Printf("🔍 DEBUG: HTTP error detected - Status: %d\n", resp.StatusCode)
 		return duration, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
+	fmt.Printf("🔍 DEBUG: Request completed successfully in %v\n", duration)
 	return duration, nil
 }
 

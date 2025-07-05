@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -110,22 +111,23 @@ func buildUserInputSection(nfServices map[string][]types.ServiceMetadata) types.
 	return userInputs
 }
 
-// buildGlobalSettingsSection - Build global settings in user-friendly format
+// buildGlobalSettingsSection - Build global settings without header comments
 func buildGlobalSettingsSection() map[string]interface{} {
 	return map[string]interface{}{
-		"# GLOBAL_SETTINGS_HEADER": map[string]interface{}{
-			"description": "GLOBAL SETTINGS - Global Configuration",
-		},
-		"# NRF Configuration": nil,
 		"nrf_url": map[string]interface{}{
 			"value":       "http://localhost:8000",
-			"description": "NRF server URL (e.g., http://nrf-nnrf:8000)",
+			"description": "NRF server URL (e.g., http://10.96.217.220:8000)",
 			"required":    true,
 		},
 		"requester_nf_type": map[string]interface{}{
 			"value":       "AF",
 			"description": "Type of requesting NF (AF, AMF, SMF, etc.)",
 			"required":    true,
+		},
+		"requester_nf_instance_id": map[string]interface{}{
+			"value":       "af-instance-12345",
+			"description": "Unique ID of requesting NF instance",
+			"required":    false,
 		},
 		"timeout_seconds": map[string]interface{}{
 			"value":       30,
@@ -150,14 +152,9 @@ func buildGlobalSettingsSection() map[string]interface{} {
 	}
 }
 
-// buildNFSettingsSection - Build NF-specific settings in user-friendly format
+// buildNFSettingsSection - Build NF-specific settings without header comments
 func buildNFSettingsSection(nfServices map[string][]types.ServiceMetadata) map[string]map[string]interface{} {
 	nfSettings := make(map[string]map[string]interface{})
-
-	// Add comments with unique keys
-	nfSettings["# NF_SETTINGS_HEADER"] = map[string]interface{}{
-		"description": "NF SETTINGS - Individual settings for each NF",
-	}
 
 	nfNames := getSortedNFNames(nfServices)
 	for _, nf := range nfNames {
@@ -907,7 +904,7 @@ func writeConfigurationFile(config types.ConfigurationFile, nfFilter string) err
 	}
 	defer file.Close()
 
-	// Add header comments
+	// Write header
 	header := `# =============================================================================
 # 5G BENCHMARK CONFIGURATION FILE
 # =============================================================================
@@ -925,24 +922,82 @@ func writeConfigurationFile(config types.ConfigurationFile, nfFilter string) err
 # - 'example' fields are for reference only, do not modify them
 # =============================================================================
 
+user_inputs:
 `
 
 	if _, err := file.WriteString(header); err != nil {
 		return fmt.Errorf("failed to write header: %w", err)
 	}
 
-	encoder := yaml.NewEncoder(file)
-	encoder.SetIndent(2)
+	// Write global_settings section
+	file.WriteString("  global_settings:\n")
+	writeYAMLSection(file, config.UserInputs.GlobalSettings, 2)
 
-	if err := encoder.Encode(&config); err != nil {
-		return fmt.Errorf("failed to write configuration: %w", err)
-	}
+	// Write NF settings separator and section
+	file.WriteString("\n# =============================================================================\n")
+	file.WriteString("# NF SETTINGS - Add NF Specific Headers & Is NF Enable\n")
+	file.WriteString("# =============================================================================\n")
+	file.WriteString("  nf_settings:\n")
+	writeYAMLSection(file, config.UserInputs.NFSettings, 2)
+
+	// Write common parameters separator and section
+	file.WriteString("\n# =============================================================================\n")
+	file.WriteString("# COMMON PARAMETERS - Parameters used across multiple APIs\n")
+	file.WriteString("# =============================================================================\n")
+	file.WriteString("  common_parameters:\n")
+	writeYAMLSection(file, config.UserInputs.CommonParameters, 2)
+
+	// Write common request bodies separator and section
+	file.WriteString("\n# =============================================================================\n")
+	file.WriteString("# COMMON REQUEST BODIES - Request bodies used across multiple APIs\n")
+	file.WriteString("# =============================================================================\n")
+	file.WriteString("  common_request_bodies:\n")
+	writeYAMLSection(file, config.UserInputs.CommonRequestBodies, 2)
+
+	// Write API-specific parameters separator and section
+	file.WriteString("\n# =============================================================================\n")
+	file.WriteString("# API-SPECIFIC PARAMETERS - Parameters specific to each API\n")
+	file.WriteString("# =============================================================================\n")
+	file.WriteString("  api_specific_parameters:\n")
+	writeYAMLSection(file, config.UserInputs.APISpecificParameters, 2)
+
+	// Write API-specific request bodies separator and section
+	file.WriteString("\n# =============================================================================\n")
+	file.WriteString("# API-SPECIFIC REQUEST BODIES - Request bodies specific to each API\n")
+	file.WriteString("# =============================================================================\n")
+	file.WriteString("  api_specific_request_bodies:\n")
+	writeYAMLSection(file, config.UserInputs.APISpecificRequestBodies, 2)
 
 	fmt.Printf("✅ Configuration file created: %s\n", filename)
 	if nfFilter != "" {
 		fmt.Printf("📋 Generated configuration for NF: %s\n", nfFilter)
 	} else {
 		fmt.Printf("📋 Generated configuration for all NFs\n")
+	}
+
+	return nil
+}
+
+// writeYAMLSection writes a YAML section with proper indentation
+func writeYAMLSection(file *os.File, data interface{}, baseIndent int) error {
+	var buf bytes.Buffer
+	encoder := yaml.NewEncoder(&buf)
+	encoder.SetIndent(2)
+
+	if err := encoder.Encode(data); err != nil {
+		return err
+	}
+	encoder.Close()
+
+	// Process each line to add proper indentation
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		// Add base indentation
+		indentedLine := strings.Repeat(" ", baseIndent) + line + "\n"
+		file.WriteString(indentedLine)
 	}
 
 	return nil
