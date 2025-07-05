@@ -24,8 +24,8 @@ var (
 
 // runAPIExecution executes API calls using api_list.yaml and configuration.yaml
 func runAPIExecution(targetNF, apiName string, iterations int) {
-	fmt.Printf("🚀 Starting API execution for %s.%s\n", targetNF, apiName)
-	fmt.Printf("📊 Iterations: %d\n\n", iterations)
+	fmt.Printf("   Starting API execution for %s.%s\n", targetNF, apiName)
+	fmt.Printf("   Iterations: %d\n\n", iterations)
 
 	// Create executor
 	executor := cli.NewAPIExecutor(30 * time.Second)
@@ -33,11 +33,11 @@ func runAPIExecution(targetNF, apiName string, iterations int) {
 	// Prepare execution info using api_list.yaml
 	execInfo, err := executor.ExecuteAPI(targetNF, apiName)
 	if err != nil {
-		log.Printf("❌ Failed to prepare API execution: %v", err)
+		log.Printf("  Failed to prepare API execution: %v", err)
 		os.Exit(1)
 	}
 
-	fmt.Printf("📋 Execution Details:\n")
+	fmt.Printf("  Execution Details:\n")
 	fmt.Printf("   NF: %s\n", execInfo.NF)
 	fmt.Printf("   API: %s\n", execInfo.APIName)
 	fmt.Printf("   Method: %s\n", execInfo.Method)
@@ -65,7 +65,7 @@ func runAPIExecution(targetNF, apiName string, iterations int) {
 		} else {
 			result.SuccessCount++
 			if i%10 == 0 {
-				fmt.Printf("✅ Request %d completed in %v\n", i+1, duration)
+				fmt.Printf("  Request %d completed in %v\n", i+1, duration)
 			}
 		}
 
@@ -82,7 +82,7 @@ func runAPIExecution(targetNF, apiName string, iterations int) {
 	result.AvgTime = result.TotalTime / time.Duration(result.TotalRequests)
 
 	fmt.Println("\n" + strings.Repeat("=", 60))
-	fmt.Println("📈 BENCHMARK RESULTS")
+	fmt.Println("  BENCHMARK RESULTS")
 	fmt.Println(strings.Repeat("=", 60))
 
 	successRate := float64(result.SuccessCount) / float64(result.TotalRequests) * 100
@@ -110,11 +110,11 @@ func main() {
 	if _, err := os.Stat(openapiDir); err == nil {
 		services, err = parser.ParseOpenAPIDir(openapiDir)
 		if err != nil {
-			log.Printf("⚠️  Failed to parse OpenAPI dir: %v", err)
+			log.Printf("   Failed to parse OpenAPI dir: %v", err)
 			os.Exit(1)
 		}
 	} else {
-		log.Printf("⚠️  OpenAPI dir '%s' not found, please create it and add your OpenAPI YAML files", openapiDir)
+		log.Printf("   OpenAPI dir '%s' not found, please create it and add your OpenAPI YAML files", openapiDir)
 	}
 
 	if *helpFlag {
@@ -135,7 +135,7 @@ func main() {
 		}
 		err := cli.BuildConfiguration(services, nfFilter)
 		if err != nil {
-			log.Printf("❌ Failed to build configuration: %v", err)
+			log.Printf("  Failed to build configuration: %v", err)
 			os.Exit(1)
 		}
 		return
@@ -148,8 +148,8 @@ func main() {
 		return
 	}
 
-	fmt.Println("❌ Target NF (-nf) and API name (-a) are required")
-	fmt.Println("💡 Use -h to see available NFs and APIs")
+	fmt.Println("   Target NF (-nf) and API name (-a) are required")
+	fmt.Println("   Use -h to see available NFs and APIs")
 	fmt.Println()
 	fmt.Println("Examples:")
 	fmt.Println("    github.com/devuk0204/ctrlbench -nf AUSF -a \"CreateUe-authentications [POST]\" -i 10")

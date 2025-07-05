@@ -122,13 +122,11 @@ func buildGlobalSettingsSection() map[string]interface{} {
 			"description": "NRF server URL (e.g., http://nrf-nnrf:8000)",
 			"required":    true,
 		},
-		"# Requester NF Information": nil,
 		"requester_nf_type": map[string]interface{}{
 			"value":       "AF",
 			"description": "Type of requesting NF (AF, AMF, SMF, etc.)",
 			"required":    true,
 		},
-		"# Network Settings": nil,
 		"timeout_seconds": map[string]interface{}{
 			"value":       30,
 			"description": "HTTP request timeout in seconds",
@@ -276,12 +274,12 @@ func buildAPISpecificRequestBodiesSection(nfServices map[string][]types.ServiceM
 	return result
 }
 
-// buildParameterInfos - 파라미터에 required 정보 포함
+// buildParameterInfos - Build parameter information with required flags and location
 func buildParameterInfos(api types.APIMetadata, service types.ServiceMetadata) []types.ParamMeta {
 	var paramInfos []types.ParamMeta
 
 	if service.OpenAPISpec != nil {
-		// OpenAPI 스펙에서 파라미터 정보 추출
+		// Extract parameter info from OpenAPI spec
 		for _, pathItem := range service.OpenAPISpec.Paths {
 			if pathItem.Get != nil && matchesAPI(pathItem.Get, api) {
 				paramInfos = extractParameterInfosFromOperation(pathItem.Get)
@@ -297,12 +295,12 @@ func buildParameterInfos(api types.APIMetadata, service types.ServiceMetadata) [
 		}
 	}
 
-	// OpenAPI에서 찾지 못한 경우 기본 파라미터 정보 생성
+	// If not found in OpenAPI, create default parameter info
 	if len(paramInfos) == 0 {
 		for _, paramName := range api.Parameters {
 			paramInfos = append(paramInfos, types.ParamMeta{
 				Name:     paramName,
-				Required: IsPathParameter(paramName, api.Path), // path parameter는 required
+				Required: IsPathParameter(paramName, api.Path), // path parameters are required
 				Type:     "string",
 				In:       inferParameterLocation(paramName, api.Path),
 			})
@@ -368,7 +366,7 @@ func matchesAPI(operation *types.Operation, api types.APIMetadata) bool {
 	return operation.OperationID == cleanAPIName
 }
 
-// inferParameterLocation - 파라미터 위치 추론
+// inferParameterLocation - Infer parameter location (path or query)
 func inferParameterLocation(paramName, path string) string {
 	if IsPathParameter(paramName, path) {
 		return "path"

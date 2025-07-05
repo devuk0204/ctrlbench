@@ -2,7 +2,7 @@ package cli
 
 import (
 	"fmt"
-	"io/ioutil"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -15,7 +15,7 @@ import (
 func LoadAPIList() (types.APIList, error) {
 	filename := filepath.Join("openapi", "api_list.yaml")
 
-	data, err := ioutil.ReadFile(filename)
+	data, err := os.ReadFile(filename)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read api_list.yaml: %w", err)
 	}
@@ -59,7 +59,7 @@ func PrepareAPIExecution(apiList types.APIList, config map[string]interface{}, n
 		return nil, fmt.Errorf("user_inputs not found in configuration")
 	}
 
-	// Prepare parameters - only required ones
+	// Prepare parameters - both required and optional
 	parameters := make(map[string]string)
 	commonParams, _ := userInputs["common_parameters"].(map[string]interface{})
 	apiSpecificParams, _ := userInputs["api_specific_parameters"].(map[string]interface{})
@@ -67,25 +67,24 @@ func PrepareAPIExecution(apiList types.APIList, config map[string]interface{}, n
 	fmt.Printf("🔍 DEBUG: Common parameters keys: %v\n", getMapKeys(commonParams))
 	fmt.Printf("🔍 DEBUG: API-specific parameters keys: %v\n", getMapKeys(apiSpecificParams))
 
+	// Process all parameters (required and optional)
 	for _, p := range apiInfo.Parameters {
-		if !p.Required {
-			fmt.Printf("🔍 DEBUG: Skipping optional parameter: %s\n", p.Name)
-			continue // Skip optional parameters
-		}
-
-		fmt.Printf("🔍 DEBUG: Processing required parameter: %s\n", p.Name)
+		fmt.Printf("🔍 DEBUG: Processing parameter: %s (required: %t, in: %s)\n", p.Name, p.Required, p.In)
 
 		// Get parameter value from configuration
 		paramValue := getParameterValue(p.Name, commonParams, apiSpecificParams)
 		fmt.Printf("🔍 DEBUG: Parameter %s value: '%s'\n", p.Name, paramValue)
 
-		if paramValue == "" {
+		// Required parameter validation
+		if p.Required && paramValue == "" {
 			fmt.Printf("❌ Required parameter '%s' is empty or missing\n", p.Name)
 			fmt.Printf("📋 Please fill the 'value' field for '%s' in configuration.yaml\n", p.Name)
 			fmt.Printf("🛑 Execution stopped - configuration incomplete\n")
 			return nil, fmt.Errorf("required parameter '%s' is empty or missing (check configuration.yaml)", p.Name)
 		}
 
+		// Add parameter to map (even if empty for optional parameters)
+		// Empty optional parameters will be filtered out in buildFinalURL
 		parameters[p.Name] = paramValue
 	}
 
