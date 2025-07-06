@@ -139,11 +139,6 @@ func buildGlobalSettingsSection() map[string]interface{} {
 			"description": "Number of retries on failure",
 			"type":        "integer",
 		},
-		"concurrent_requests": map[string]interface{}{
-			"value":       1,
-			"description": "Number of concurrent requests",
-			"type":        "integer",
-		},
 		"use_https": map[string]interface{}{
 			"value":       false,
 			"description": "Whether to use HTTPS",
@@ -189,7 +184,7 @@ func buildCommonParametersSection(nfServices map[string][]types.ServiceMetadata)
 		"# COMMON_PARAMETERS_HEADER": map[string]interface{}{
 			"description": "COMMON PARAMETERS - Parameters used across multiple APIs",
 		},
-		"# Instructions": map[string]interface{}{
+		"# Common_Parameter_Instructions": map[string]interface{}{
 			"description": "Please modify the values below according to your environment",
 		},
 	}
@@ -223,7 +218,7 @@ func buildCommonRequestBodiesSection(nfServices map[string][]types.ServiceMetada
 		"# COMMON_REQUEST_BODIES_HEADER": map[string]interface{}{
 			"description": "COMMON REQUEST BODIES - Request bodies used across multiple APIs",
 		},
-		"# Instructions": map[string]interface{}{
+		"# Common_Bodies_Instructions": map[string]interface{}{
 			"description": "Please enter actual values in the 'value' field of each property",
 		},
 	}

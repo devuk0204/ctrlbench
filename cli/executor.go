@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/devuk0204/ctrlbench/types"
@@ -374,4 +376,217 @@ func (e *APIExecutor) RunBenchmark(execInfo *types.APIExecutionInfo, iterations 
 	}
 
 	return result, nil
+}
+
+// RequestResult represents individual request result for concurrent benchmarking
+type RequestResult struct {
+	Duration  time.Duration
+	Error     error
+	Status    int
+	WorkerID  int
+	Timestamp time.Time
+}
+
+// RunConcurrentBenchmark runs benchmark with concurrent connections like wrk
+func (e *APIExecutor) RunConcurrentBenchmark(execInfo *types.APIExecutionInfo, concurrency int, duration time.Duration, rateLimit int) (*types.BenchmarkResult, error) {
+	fmt.Printf("🚀 Starting concurrent benchmark:\n")
+	fmt.Printf("   Concurrent Connections: %d\n", concurrency)
+	if duration > 0 {
+		fmt.Printf("   Duration: %v\n", duration)
+	}
+	if rateLimit > 0 {
+		fmt.Printf("   Rate Limit: %d req/s\n", rateLimit)
+	}
+
+	// Results collection
+	results := make(chan *RequestResult, concurrency*100)
+	var wg sync.WaitGroup
+
+	// Rate limiter
+	var rateLimiter <-chan time.Time
+	if rateLimit > 0 {
+		rateLimiter = time.Tick(time.Second / time.Duration(rateLimit))
+	}
+
+	// Start and end time
+	startTime := time.Now()
+	var endTime time.Time
+	if duration > 0 {
+		endTime = startTime.Add(duration)
+	} else {
+		endTime = startTime.Add(time.Hour) // Long enough time
+	}
+
+	// Worker pool
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+
+			// HTTP client per worker for connection reuse
+			client := &http.Client{
+				Timeout: e.Timeout,
+				Transport: &http.Transport{
+					MaxIdleConns:        10,
+					MaxIdleConnsPerHost: 10,
+					IdleConnTimeout:     30 * time.Second,
+				},
+			}
+
+			for time.Now().Before(endTime) {
+				// Rate limiting
+				if rateLimiter != nil {
+					<-rateLimiter
+				}
+
+				result := e.executeRequestWithClient(execInfo, client, workerID)
+				results <- result
+
+				if time.Now().After(endTime) {
+					break
+				}
+			}
+		}(i)
+	}
+
+	// Wait for completion
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	// Collect results
+	return e.collectConcurrentResults(results, startTime)
+}
+
+// executeRequestWithClient executes HTTP request with provided client
+func (e *APIExecutor) executeRequestWithClient(execInfo *types.APIExecutionInfo, client *http.Client, workerID int) *RequestResult {
+	start := time.Now()
+
+	fullURL := e.buildFinalURL(execInfo)
+
+	var requestBody []byte
+	if execInfo.RequestBody != nil {
+		var err error
+		requestBody, err = json.Marshal(execInfo.RequestBody)
+		if err != nil {
+			return &RequestResult{
+				Duration:  time.Since(start),
+				Error:     err,
+				WorkerID:  workerID,
+				Timestamp: start,
+			}
+		}
+	}
+
+	req, err := http.NewRequest(execInfo.Method, fullURL, bytes.NewBuffer(requestBody))
+	if err != nil {
+		return &RequestResult{
+			Duration:  time.Since(start),
+			Error:     err,
+			WorkerID:  workerID,
+			Timestamp: start,
+		}
+	}
+
+	for key, value := range execInfo.Headers {
+		req.Header.Set(key, value)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return &RequestResult{
+			Duration:  time.Since(start),
+			Error:     err,
+			WorkerID:  workerID,
+			Timestamp: start,
+		}
+	}
+	defer resp.Body.Close()
+
+	// Read response body to complete request
+	_, _ = io.ReadAll(resp.Body)
+
+	return &RequestResult{
+		Duration:  time.Since(start),
+		Status:    resp.StatusCode,
+		WorkerID:  workerID,
+		Timestamp: start,
+	}
+}
+
+// collectConcurrentResults processes concurrent benchmark results
+func (e *APIExecutor) collectConcurrentResults(results <-chan *RequestResult, startTime time.Time) (*types.BenchmarkResult, error) {
+	var allDurations []time.Duration
+	var successCount, failureCount int
+	var totalTime time.Duration
+	var minTime, maxTime time.Duration
+	errorDistribution := make(map[string]int)
+
+	for result := range results {
+		allDurations = append(allDurations, result.Duration)
+		totalTime += result.Duration
+
+		if result.Error != nil {
+			failureCount++
+			errorType := fmt.Sprintf("Error: %v", result.Error)
+			errorDistribution[errorType]++
+		} else if result.Status >= 400 {
+			failureCount++
+			errorType := fmt.Sprintf("HTTP %d", result.Status)
+			errorDistribution[errorType]++
+		} else {
+			successCount++
+		}
+
+		if len(allDurations) == 1 || result.Duration < minTime {
+			minTime = result.Duration
+		}
+		if len(allDurations) == 1 || result.Duration > maxTime {
+			maxTime = result.Duration
+		}
+	}
+
+	totalRequests := successCount + failureCount
+	if totalRequests == 0 {
+		return nil, fmt.Errorf("no requests completed")
+	}
+
+	actualDuration := time.Since(startTime)
+	requestsPerSecond := float64(totalRequests) / actualDuration.Seconds()
+	avgTime := totalTime / time.Duration(totalRequests)
+
+	percentiles := calculatePercentiles(allDurations)
+
+	return &types.BenchmarkResult{
+		TotalRequests:     totalRequests,
+		SuccessCount:      successCount,
+		FailureCount:      failureCount,
+		TotalTime:         actualDuration,
+		AvgTime:           avgTime,
+		MinTime:           minTime,
+		MaxTime:           maxTime,
+		RequestsPerSecond: requestsPerSecond,
+		Percentiles:       percentiles,
+		ErrorDistribution: errorDistribution,
+	}, nil
+}
+
+// calculatePercentiles calculates response time percentiles
+func calculatePercentiles(durations []time.Duration) map[string]time.Duration {
+	if len(durations) == 0 {
+		return nil
+	}
+
+	sort.Slice(durations, func(i, j int) bool {
+		return durations[i] < durations[j]
+	})
+
+	return map[string]time.Duration{
+		"50th": durations[len(durations)*50/100],
+		"75th": durations[len(durations)*75/100],
+		"90th": durations[len(durations)*90/100],
+		"95th": durations[len(durations)*95/100],
+		"99th": durations[len(durations)*99/100],
+	}
 }
