@@ -17,20 +17,26 @@ import (
 
 // APIExecutor handles API execution and benchmarking
 type APIExecutor struct {
-	Timeout time.Duration
+	Timeout         time.Duration
+	httpClient      *HTTPClient
+	requestBuilder  *RequestBuilder
+	benchmarkRunner *BenchmarkRunner
 }
 
 // NewAPIExecutor creates a new API executor
 func NewAPIExecutor(timeout time.Duration) *APIExecutor {
 	return &APIExecutor{
-		Timeout: timeout,
+		Timeout:         timeout,
+		httpClient:      NewHTTPClient(),
+		requestBuilder:  NewRequestBuilder(),
+		benchmarkRunner: NewBenchmarkRunner(),
 	}
 }
 
 // ExecuteAPI executes a specific API call using api_list.yaml
 func (e *APIExecutor) ExecuteAPI(targetNF, apiName string) (*types.APIExecutionInfo, error) {
 	// Load API list
-	apiList, err := LoadAPIList()
+	apiList, err := e.requestBuilder.LoadAPIList()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load API list: %w", err)
 	}
@@ -42,7 +48,7 @@ func (e *APIExecutor) ExecuteAPI(targetNF, apiName string) (*types.APIExecutionI
 	}
 
 	// Prepare execution info from api_list and configuration (with required validation)
-	execInfo, err := PrepareAPIExecution(apiList, config, targetNF, apiName)
+	execInfo, err := e.requestBuilder.PrepareAPIExecution(apiList, config, targetNF, apiName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare API execution: %w", err)
 	}
@@ -80,10 +86,10 @@ func (e *APIExecutor) ExecuteAPI(targetNF, apiName string) (*types.APIExecutionI
 	execInfo.DiscoveredURL = discoveredURL
 
 	// Populate headers
-	e.populateHeaders(execInfo, targetNF, config)
+	e.requestBuilder.PopulateHeaders(execInfo, targetNF, config)
 
 	// Build and display final URL once
-	finalURL := e.buildFinalURL(execInfo)
+	finalURL := e.requestBuilder.BuildFinalURL(execInfo)
 	fmt.Printf("🔗 Final URL: %s\n", finalURL)
 
 	return execInfo, nil
@@ -206,102 +212,25 @@ func (e *APIExecutor) populateHeaders(execInfo *types.APIExecutionInfo, targetNF
 func (e *APIExecutor) ExecuteHTTPCall(execInfo *types.APIExecutionInfo) (time.Duration, error) {
 	start := time.Now()
 
-	// Build full URL using the same logic as buildFinalURL
-	fullURL := e.buildFinalURL(execInfo)
+	// Use the new HTTPClient to execute the request
+	result := e.httpClient.ExecuteWithResult(execInfo, 0)
 
-	// Prepare request body
-	var requestBody []byte
-	if execInfo.RequestBody != nil {
-		var err error
-		requestBody, err = json.Marshal(execInfo.RequestBody)
-		if err != nil {
-			return 0, fmt.Errorf("failed to marshal request body: %w", err)
-		}
-		fmt.Printf("🔍 DEBUG: Request Body: %s\n", string(requestBody))
-	} else {
-		fmt.Printf("🔍 DEBUG: No request body\n")
+	if result.Error != nil {
+		return 0, result.Error
 	}
-
-	// Create HTTP request
-	req, err := http.NewRequest(execInfo.Method, fullURL, bytes.NewBuffer(requestBody))
-	if err != nil {
-		return 0, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	// Add headers from execInfo
-	fmt.Printf("🔍 DEBUG: Adding headers to request:\n")
-	for key, value := range execInfo.Headers {
-		req.Header.Set(key, value)
-		fmt.Printf("   %s: %s\n", key, value)
-	}
-
-	// Debug: Print all request headers (including any defaults added by Go)
-	fmt.Printf("🔍 DEBUG: Final request headers:\n")
-	for key, values := range req.Header {
-		for _, value := range values {
-			fmt.Printf("   %s: %s\n", key, value)
-		}
-	}
-
-	fmt.Printf("🔍 DEBUG: Making %s request to: %s\n", execInfo.Method, fullURL)
-
-	// Execute request
-	client := &http.Client{Timeout: e.Timeout}
-	resp, err := client.Do(req)
-	if err != nil {
-		fmt.Printf("🔍 DEBUG: Request failed with error: %v\n", err)
-		return time.Since(start), fmt.Errorf("HTTP request failed: %w", err)
-	}
-	defer resp.Body.Close()
 
 	duration := time.Since(start)
 
-	// Debug: Print response status and headers
-	fmt.Printf("🔍 DEBUG: Response Status: %s (%d)\n", resp.Status, resp.StatusCode)
-	fmt.Printf("🔍 DEBUG: Response Headers:\n")
-	for key, values := range resp.Header {
-		for _, value := range values {
-			fmt.Printf("   %s: %s\n", key, value)
-		}
-	}
+	// Debug output
+	fmt.Printf("🔍 DEBUG: HTTP %s %s -> %d (%v)\n",
+		execInfo.Method, execInfo.DiscoveredURL, result.Status, duration)
 
-	// Read response body
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		fmt.Printf("🔍 DEBUG: Failed to read response body: %v\n", err)
-		return duration, fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	// Debug: Print response body
-	if len(body) > 0 {
-		fmt.Printf("🔍 DEBUG: Response Body (raw): %s\n", string(body))
-
-		// Try to format JSON response for better readability
-		var jsonData interface{}
-		if err := json.Unmarshal(body, &jsonData); err == nil {
-			if prettyJSON, err := json.MarshalIndent(jsonData, "", "  "); err == nil {
-				fmt.Printf("🔍 DEBUG: Response Body (formatted):\n%s\n", string(prettyJSON))
-			}
-		} else {
-			fmt.Printf("🔍 DEBUG: Response is not valid JSON: %v\n", err)
-		}
-	} else {
-		fmt.Printf("🔍 DEBUG: Empty response body\n")
-	}
-
-	// Check response status
-	if resp.StatusCode >= 400 {
-		fmt.Printf("🔍 DEBUG: HTTP error detected - Status: %d\n", resp.StatusCode)
-		return duration, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
-	}
-
-	fmt.Printf("🔍 DEBUG: Request completed successfully in %v\n", duration)
 	return duration, nil
 }
 
 // getServicePath retrieves service path from api_list.yaml
 func (e *APIExecutor) getServicePath(nf, apiName string) string {
-	apiList, err := LoadAPIList()
+	apiList, err := e.requestBuilder.LoadAPIList()
 	if err != nil {
 		fmt.Printf("⚠️  Failed to load API list: %v\n", err)
 		return ""
