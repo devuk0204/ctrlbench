@@ -12,23 +12,6 @@ import (
 	"github.com/devuk0204/ctrlbench/types"
 )
 
-// getCfgString returns cfg.<key>.value if the node is a map,
-// otherwise tries to cast the raw node to string.
-func getCfgString(node interface{}) (string, bool) {
-	if m, ok := node.(map[string]interface{}); ok {
-		if v, ok := m["value"].(string); ok {
-			return v, true
-		}
-	}
-	str, ok := node.(string)
-	return str, ok
-}
-
-// trimSlashRight removes the trailing slash once.
-func trimSlashRight(s string) string {
-	return strings.TrimSuffix(s, "/")
-}
-
 type NFDiscoveryClient struct {
 	NRFURL     string
 	HTTPClient *http.Client
@@ -36,7 +19,7 @@ type NFDiscoveryClient struct {
 
 func NewNFDiscoveryClient(nrfURL string, timeout time.Duration) *NFDiscoveryClient {
 	return &NFDiscoveryClient{
-		NRFURL: trimSlashRight(nrfURL),
+		NRFURL: TrimSlashRight(nrfURL),
 		HTTPClient: &http.Client{
 			Timeout: timeout,
 		},
@@ -137,19 +120,19 @@ func (c *NFDiscoveryClient) DiscoverAndGetURL(
 	return "", fmt.Errorf("no suitable ipEndPoint found")
 }
 
-// NFDiscoveryURL is used by the benchmark runner.
+// BuildNFDiscoveryURL is used by the benchmark runner.
 // It reads human-friendly configuration nodes and launches discovery.
-func NFDiscoveryURL(
+func BuildNFDiscoveryURL(
 	cfg map[string]interface{},
 	targetNFType string,
 ) (string, error) {
 
-	nrfURL, ok := getCfgString(cfg["nrf_url"])
+	nrfURL, ok := GetConfigString(cfg["nrf_url"])
 	if !ok {
 		return "", fmt.Errorf("nrf_url missing in configuration")
 	}
-	reqType, _ := getCfgString(cfg["requester_nf_type"])
-	reqID, _ := getCfgString(cfg["requester_nf_instance_id"])
+	reqType, _ := GetConfigString(cfg["requester_nf_type"])
+	reqID, _ := GetConfigString(cfg["requester_nf_instance_id"])
 
 	client := NewNFDiscoveryClient(nrfURL, 10*time.Second)
 	url, err := client.DiscoverAndGetURL(targetNFType, reqType, reqID)

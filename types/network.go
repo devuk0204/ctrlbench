@@ -1,5 +1,6 @@
 package types
 
+// Network Function Discovery types
 type IpEndPoint struct {
 	IPv4Address string `json:"ipv4Address,omitempty"`
 	IPv6Address string `json:"ipv6Address,omitempty"`
@@ -18,15 +19,15 @@ type NFProfile struct {
 }
 
 type NFService struct {
-	ServiceInstanceID string      `json:"serviceInstanceId"`
-	ServiceName       string      `json:"serviceName"`
-	Versions          []Version   `json:"versions,omitempty"`
-	Scheme            string      `json:"scheme,omitempty"`
-	FQDN              string      `json:"fqdn,omitempty"`
-	IPv4Addresses     []string    `json:"ipv4Addresses,omitempty"`
+	ServiceInstanceID string       `json:"serviceInstanceId"`
+	ServiceName       string       `json:"serviceName"`
+	Versions          []Version    `json:"versions,omitempty"`
+	Scheme            string       `json:"scheme,omitempty"`
+	FQDN              string       `json:"fqdn,omitempty"`
+	IPv4Addresses     []string     `json:"ipv4Addresses,omitempty"`
 	IpEndPoints       []IpEndPoint `json:"ipEndPoints,omitempty"`
-	Port              int         `json:"port,omitempty"`
-	APIPrefix         string      `json:"apiPrefix,omitempty"`
+	Port              int          `json:"port,omitempty"`
+	APIPrefix         string       `json:"apiPrefix,omitempty"`
 }
 
 type Version struct {

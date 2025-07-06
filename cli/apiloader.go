@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/devuk0204/ctrlbench/types"
-
 	"gopkg.in/yaml.v3"
+
+	"github.com/devuk0204/ctrlbench/types"
 )
 
 // LoadAPIList loads api_list.yaml file

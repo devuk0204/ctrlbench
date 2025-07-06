@@ -2,21 +2,22 @@ package parser
 
 import (
 	"fmt"
-	"io/ioutil"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
-
-	"github.com/devuk0204/ctrlbench/types"
+	"unicode"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/devuk0204/ctrlbench/types"
 )
 
 // ParseOpenAPIDir parses OpenAPI YAML files and returns service metadata
 func ParseOpenAPIDir(dirPath string) (map[string]types.ServiceMetadata, error) {
 	services := make(map[string]types.ServiceMetadata)
 
-	files, err := ioutil.ReadDir(dirPath)
+	files, err := os.ReadDir(dirPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read openapi dir: %w", err)
 	}
@@ -46,7 +47,7 @@ func isYAMLFile(filename string) bool {
 
 // loadOpenAPISpec loads and parses OpenAPI spec from file
 func loadOpenAPISpec(filePath string) (*types.OpenAPISpec, error) {
-	data, err := ioutil.ReadFile(filePath)
+	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, err
 	}
@@ -275,11 +276,11 @@ func generateAPIName(method, path string) string {
 	}
 
 	if len(validSegments) == 0 {
-		return strings.Title(strings.ToLower(method))
+		return toTitle(strings.ToLower(method))
 	}
 
 	combinedName := strings.Join(validSegments, " ")
-	combinedName = strings.Title(strings.ReplaceAll(combinedName, "-", " "))
+	combinedName = toTitle(strings.ReplaceAll(combinedName, "-", " "))
 
 	switch method {
 	case "GET":
@@ -294,7 +295,7 @@ func generateAPIName(method, path string) string {
 	case "DELETE":
 		return "Delete" + combinedName
 	default:
-		return strings.Title(strings.ToLower(method)) + combinedName
+		return toTitle(strings.ToLower(method)) + combinedName
 	}
 }
 
@@ -567,4 +568,24 @@ func GetDefaultServices() map[string]types.ServiceMetadata {
 			},
 		},
 	}
+}
+
+// toTitle converts a string to title case (replacement for deprecated strings.Title)
+func toTitle(s string) string {
+	if s == "" {
+		return s
+	}
+
+	words := strings.Fields(s)
+	for i, word := range words {
+		if len(word) > 0 {
+			runes := []rune(word)
+			runes[0] = unicode.ToUpper(runes[0])
+			for j := 1; j < len(runes); j++ {
+				runes[j] = unicode.ToLower(runes[j])
+			}
+			words[i] = string(runes)
+		}
+	}
+	return strings.Join(words, " ")
 }

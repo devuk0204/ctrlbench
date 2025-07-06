@@ -34,3 +34,14 @@ type APIExecutionInfo struct {
 	RequestBody   interface{}       `json:"request_body"`
 	Headers       map[string]string `json:"headers"`
 }
+
+// ExecutionResult represents the result of an API execution
+type ExecutionResult struct {
+	Success     bool                   `json:"success"`
+	StatusCode  int                    `json:"status_code"`
+	Response    map[string]interface{} `json:"response,omitempty"`
+	Error       string                 `json:"error,omitempty"`
+	Latency     time.Duration          `json:"latency"`
+	Timestamp   time.Time              `json:"timestamp"`
+	RequestInfo APIExecutionInfo       `json:"request_info"`
+}

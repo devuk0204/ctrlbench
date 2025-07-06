@@ -2,7 +2,11 @@ package cli
 
 import (
 	"fmt"
+	"os"
+	"sort"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/devuk0204/ctrlbench/types"
 )
@@ -32,10 +36,10 @@ func ExtractServicePath(service types.ServiceMetadata) string {
 		}
 	}
 
-	return ExtractServicePathFromAPIs(service)
+	return ExtractServicePathFromAPI(service)
 }
 
-func ExtractServicePathFromAPIs(service types.ServiceMetadata) string {
+func ExtractServicePathFromAPI(service types.ServiceMetadata) string {
 	if len(service.APIs) == 0 {
 		return "/"
 	}
@@ -74,7 +78,7 @@ func ExtractVersionFromPath(servicePath string) string {
 }
 
 // API 이름 관련 유틸리티 함수들
-func ExtractMethodFromAPIName(apiName string) string {
+func ExtractMethodFromAPI(apiName string) string {
 	methods := []string{"POST", "GET", "PUT", "DELETE", "PATCH"}
 	for _, method := range methods {
 		if strings.Contains(apiName, "["+method+"]") {
@@ -119,8 +123,34 @@ func IsPathParameter(paramName, path string) bool {
 	return strings.Contains(path, "{"+paramName+"}")
 }
 
-// ExtractValueFromConfigNode extracts value from configuration node
-func ExtractValueFromConfigNode(node interface{}) string {
+// Configuration value extraction functions
+
+// GetConfigString extracts string value from configuration node
+// Handles both new format (map with "value" key) and old format (direct string)
+func GetConfigString(node interface{}) (string, bool) {
+	if node == nil {
+		return "", false
+	}
+
+	// Handle new configuration format: {value: "..."}
+	if nodeMap, ok := node.(map[string]interface{}); ok {
+		if val, exists := nodeMap["value"]; exists {
+			if str, ok := val.(string); ok {
+				return str, true
+			}
+		}
+	}
+
+	// Handle direct string value (old format)
+	if str, ok := node.(string); ok {
+		return str, true
+	}
+
+	return "", false
+}
+
+// GetConfigValue extracts any value from configuration node and converts to string
+func GetConfigValue(node interface{}) string {
 	if node == nil {
 		return ""
 	}
@@ -134,4 +164,56 @@ func ExtractValueFromConfigNode(node interface{}) string {
 
 	// If it's a direct value (old format or simple value)
 	return fmt.Sprintf("%v", node)
+}
+
+// YAML file loading functions
+
+// LoadYAMLFile loads and parses a YAML file into the provided interface
+func LoadYAMLFile(filename string, target interface{}) error {
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return fmt.Errorf("failed to read %s: %w", filename, err)
+	}
+
+	if err := yaml.Unmarshal(data, target); err != nil {
+		return fmt.Errorf("failed to parse %s: %w", filename, err)
+	}
+
+	return nil
+}
+
+// LoadConfiguration loads configuration.yaml file
+func LoadConfiguration() (map[string]interface{}, error) {
+	var config map[string]interface{}
+	err := LoadYAMLFile("configuration.yaml", &config)
+	return config, err
+}
+
+// Map and slice utility functions
+
+// GetSortedKeys returns sorted keys from any map[string]T
+func GetSortedKeys[T any](m map[string]T) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// String utility functions
+
+// TrimSlashRight removes trailing slash from string
+func TrimSlashRight(s string) string {
+	return strings.TrimSuffix(s, "/")
+}
+
+// TrimSlashLeft removes leading slash from string
+func TrimSlashLeft(s string) string {
+	return strings.TrimPrefix(s, "/")
+}
+
+// NormalizeURL ensures URL has proper format (no trailing slash)
+func NormalizeURL(url string) string {
+	return TrimSlashRight(url)
 }

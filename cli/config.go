@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
-	"github.com/devuk0204/ctrlbench/types"
 	"gopkg.in/yaml.v3"
+
+	"github.com/devuk0204/ctrlbench/types"
 )
 
 // BuildConfiguration creates configuration.yaml and api_list.yaml
@@ -66,7 +66,7 @@ func buildAPIList(nfServices map[string][]types.ServiceMetadata) types.APIList {
 			serviceAPIs := make(map[string]types.APIListEntry)
 
 			for apiName, api := range service.APIs {
-				method := ExtractMethodFromAPIName(apiName)
+				method := ExtractMethodFromAPI(apiName)
 				cleanName := CleanAPIName(apiName)
 
 				parameterInfos := buildParameterInfos(api, service)
@@ -151,7 +151,7 @@ func buildGlobalSettingsSection() map[string]interface{} {
 func buildNFSettingsSection(nfServices map[string][]types.ServiceMetadata) map[string]map[string]interface{} {
 	nfSettings := make(map[string]map[string]interface{})
 
-	nfNames := getSortedNFNames(nfServices)
+	nfNames := GetSortedKeys(nfServices)
 	for _, nf := range nfNames {
 		nfSettings[nf] = map[string]interface{}{
 			"enabled": map[string]interface{}{
@@ -274,15 +274,15 @@ func buildParameterInfos(api types.APIMetadata, service types.ServiceMetadata) [
 		// Extract parameter info from OpenAPI spec
 		for _, pathItem := range service.OpenAPISpec.Paths {
 			if pathItem.Get != nil && matchesAPI(pathItem.Get, api) {
-				paramInfos = extractParameterInfosFromOperation(pathItem.Get)
+				paramInfos = extractParameterInfos(pathItem.Get)
 			} else if pathItem.Post != nil && matchesAPI(pathItem.Post, api) {
-				paramInfos = extractParameterInfosFromOperation(pathItem.Post)
+				paramInfos = extractParameterInfos(pathItem.Post)
 			} else if pathItem.Put != nil && matchesAPI(pathItem.Put, api) {
-				paramInfos = extractParameterInfosFromOperation(pathItem.Put)
+				paramInfos = extractParameterInfos(pathItem.Put)
 			} else if pathItem.Delete != nil && matchesAPI(pathItem.Delete, api) {
-				paramInfos = extractParameterInfosFromOperation(pathItem.Delete)
+				paramInfos = extractParameterInfos(pathItem.Delete)
 			} else if pathItem.Patch != nil && matchesAPI(pathItem.Patch, api) {
-				paramInfos = extractParameterInfosFromOperation(pathItem.Patch)
+				paramInfos = extractParameterInfos(pathItem.Patch)
 			}
 		}
 	}
@@ -336,7 +336,7 @@ func buildRequestBodyInfo(api types.APIMetadata) types.BodyMeta {
 }
 
 // extractParameterInfosFromOperation - Operation에서 파라미터 정보 추출
-func extractParameterInfosFromOperation(operation *types.Operation) []types.ParamMeta {
+func extractParameterInfos(operation *types.Operation) []types.ParamMeta {
 	var paramInfos []types.ParamMeta
 
 	for _, param := range operation.Parameters {
@@ -494,7 +494,7 @@ func extractParametersFromOpenAPISpec(spec *types.OpenAPISpec, params map[string
 				for _, param := range operation.Parameters {
 					if _, exists := params[param.Name]; !exists {
 						params[param.Name] = map[string]interface{}{
-							"description": getParameterDescription(param),
+							"description": getParameterDesc(param),
 							"required":    param.Required,
 							"type":        getSchemaType(param.Schema),
 							"in":          param.In,
@@ -509,7 +509,7 @@ func extractParametersFromOpenAPISpec(spec *types.OpenAPISpec, params map[string
 }
 
 // getParameterDescription - Get parameter description
-func getParameterDescription(param types.Parameter) string {
+func getParameterDesc(param types.Parameter) string {
 	if param.Description != "" {
 		return param.Description
 	}
@@ -831,15 +831,6 @@ func calculateBodyFrequency(bodyName string) int {
 	return 1 // Low frequency
 }
 
-func getSortedNFNames(nfServices map[string][]types.ServiceMetadata) []string {
-	nfNames := make([]string, 0, len(nfServices))
-	for nf := range nfServices {
-		nfNames = append(nfNames, nf)
-	}
-	sort.Strings(nfNames)
-	return nfNames
-}
-
 // File writing functions
 func writeAPIListFile(apiList types.APIList) error {
 	openapiDir := "./openapi"
@@ -926,42 +917,42 @@ user_inputs:
 
 	// Write global_settings section
 	file.WriteString("  global_settings:\n")
-	writeYAMLSection(file, config.UserInputs.GlobalSettings, 2)
+	writeYAMLSection(file, config.UserInputs.GlobalSettings, 4)
 
 	// Write NF settings separator and section
 	file.WriteString("\n# =============================================================================\n")
 	file.WriteString("# NF SETTINGS - Add NF Specific Headers & Is NF Enable\n")
 	file.WriteString("# =============================================================================\n")
 	file.WriteString("  nf_settings:\n")
-	writeYAMLSection(file, config.UserInputs.NFSettings, 2)
+	writeYAMLSection(file, config.UserInputs.NFSettings, 4)
 
 	// Write common parameters separator and section
 	file.WriteString("\n# =============================================================================\n")
 	file.WriteString("# COMMON PARAMETERS - Parameters used across multiple APIs\n")
 	file.WriteString("# =============================================================================\n")
 	file.WriteString("  common_parameters:\n")
-	writeYAMLSection(file, config.UserInputs.CommonParameters, 2)
+	writeYAMLSection(file, config.UserInputs.CommonParameters, 4)
 
 	// Write common request bodies separator and section
 	file.WriteString("\n# =============================================================================\n")
 	file.WriteString("# COMMON REQUEST BODIES - Request bodies used across multiple APIs\n")
 	file.WriteString("# =============================================================================\n")
 	file.WriteString("  common_request_bodies:\n")
-	writeYAMLSection(file, config.UserInputs.CommonRequestBodies, 2)
+	writeYAMLSection(file, config.UserInputs.CommonRequestBodies, 4)
 
 	// Write API-specific parameters separator and section
 	file.WriteString("\n# =============================================================================\n")
 	file.WriteString("# API-SPECIFIC PARAMETERS - Parameters specific to each API\n")
 	file.WriteString("# =============================================================================\n")
 	file.WriteString("  api_specific_parameters:\n")
-	writeYAMLSection(file, config.UserInputs.APISpecificParameters, 2)
+	writeYAMLSection(file, config.UserInputs.APISpecificParameters, 4)
 
 	// Write API-specific request bodies separator and section
 	file.WriteString("\n# =============================================================================\n")
 	file.WriteString("# API-SPECIFIC REQUEST BODIES - Request bodies specific to each API\n")
 	file.WriteString("# =============================================================================\n")
 	file.WriteString("  api_specific_request_bodies:\n")
-	writeYAMLSection(file, config.UserInputs.APISpecificRequestBodies, 2)
+	writeYAMLSection(file, config.UserInputs.APISpecificRequestBodies, 4)
 
 	fmt.Printf("✅ Configuration file created: %s\n", filename)
 	if nfFilter != "" {

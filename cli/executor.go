@@ -7,14 +7,12 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/devuk0204/ctrlbench/types"
-	"gopkg.in/yaml.v3"
 )
 
 // APIExecutor handles API execution and benchmarking
@@ -38,7 +36,7 @@ func (e *APIExecutor) ExecuteAPI(targetNF, apiName string) (*types.APIExecutionI
 	}
 
 	// Load configuration
-	config, err := e.loadConfiguration()
+	config, err := LoadConfiguration()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load configuration: %w", err)
 	}
@@ -57,7 +55,7 @@ func (e *APIExecutor) ExecuteAPI(targetNF, apiName string) (*types.APIExecutionI
 
 	// Skip NF Discovery for NRF - use NRF URL directly
 	if strings.ToUpper(targetNF) == "NRF" {
-		nrfURL, ok := getCfgString(globalSettings["nrf_url"])
+		nrfURL, ok := GetConfigString(globalSettings["nrf_url"])
 		if !ok || nrfURL == "" {
 			return nil, fmt.Errorf("NRF URL is required in configuration for NRF target")
 		}
@@ -136,22 +134,7 @@ func (e *APIExecutor) buildFinalURL(execInfo *types.APIExecutionInfo) string {
 
 // discoverNFURL discovers NF URL using NRF
 func (e *APIExecutor) discoverNFURL(globalCfg map[string]interface{}, targetNF string) (string, error) {
-	return NFDiscoveryURL(globalCfg, targetNF)
-}
-
-// loadConfiguration loads configuration.yaml
-func (e *APIExecutor) loadConfiguration() (map[string]interface{}, error) {
-	data, err := os.ReadFile("configuration.yaml")
-	if err != nil {
-		return nil, fmt.Errorf("failed to read configuration.yaml: %w", err)
-	}
-
-	var config map[string]interface{}
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("failed to parse configuration.yaml: %w", err)
-	}
-
-	return config, nil
+	return BuildNFDiscoveryURL(globalCfg, targetNF)
 }
 
 // populateHeaders populates HTTP headers for the request

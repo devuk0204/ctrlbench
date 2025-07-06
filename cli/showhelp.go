@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/devuk0204/ctrlbench/types"
@@ -40,7 +39,7 @@ func showAllNFs(services map[string]types.ServiceMetadata) {
 	fmt.Println(strings.Repeat("=", 50))
 
 	nfServices := GroupServicesByNF(services)
-	nfNames := getSortedKeys(nfServices)
+	nfNames := GetSortedKeys(nfServices)
 
 	for _, nf := range nfNames {
 		serviceList := nfServices[nf]
@@ -79,10 +78,10 @@ func showSpecificNF(services map[string]types.ServiceMetadata, nfFilter string) 
 
 		fmt.Printf("📂 %s [%s]\n", CleanServiceName(service.Name), servicePath)
 
-		apiNames := getSortedKeys(service.APIs)
+		apiNames := GetSortedKeys(service.APIs)
 		for _, apiName := range apiNames {
 			api := service.APIs[apiName]
-			method := ExtractMethodFromAPIName(apiName)
+			method := ExtractMethodFromAPI(apiName)
 			cleanName := CleanAPIName(apiName)
 
 			fmt.Printf("    📄 %s\n", cleanName)
@@ -117,15 +116,15 @@ func getRequiredParameters(api types.APIMetadata, service types.ServiceMetadata)
 		// Find required parameters from OpenAPI spec
 		for _, pathItem := range service.OpenAPISpec.Paths {
 			if pathItem.Get != nil && pathItem.Get.OperationID == strings.TrimSuffix(api.Name, " [GET]") {
-				requiredParams = extractRequiredParamsFromOperation(pathItem.Get)
+				requiredParams = extractRequiredParams(pathItem.Get)
 			} else if pathItem.Post != nil && pathItem.Post.OperationID == strings.TrimSuffix(api.Name, " [POST]") {
-				requiredParams = extractRequiredParamsFromOperation(pathItem.Post)
+				requiredParams = extractRequiredParams(pathItem.Post)
 			} else if pathItem.Put != nil && pathItem.Put.OperationID == strings.TrimSuffix(api.Name, " [PUT]") {
-				requiredParams = extractRequiredParamsFromOperation(pathItem.Put)
+				requiredParams = extractRequiredParams(pathItem.Put)
 			} else if pathItem.Delete != nil && pathItem.Delete.OperationID == strings.TrimSuffix(api.Name, " [DELETE]") {
-				requiredParams = extractRequiredParamsFromOperation(pathItem.Delete)
+				requiredParams = extractRequiredParams(pathItem.Delete)
 			} else if pathItem.Patch != nil && pathItem.Patch.OperationID == strings.TrimSuffix(api.Name, " [PATCH]") {
-				requiredParams = extractRequiredParamsFromOperation(pathItem.Patch)
+				requiredParams = extractRequiredParams(pathItem.Patch)
 			}
 		}
 	}
@@ -143,7 +142,7 @@ func getRequiredParameters(api types.APIMetadata, service types.ServiceMetadata)
 }
 
 // extractRequiredParamsFromOperation - Extract required parameters from operation
-func extractRequiredParamsFromOperation(operation *types.Operation) []string {
+func extractRequiredParams(operation *types.Operation) []string {
 	var requiredParams []string
 
 	for _, param := range operation.Parameters {
@@ -179,14 +178,4 @@ func getRequiredRequestBodyFields(api types.APIMetadata) []string {
 	}
 
 	return []string{}
-}
-
-// Helper functions
-func getSortedKeys[T any](m map[string]T) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
 }
