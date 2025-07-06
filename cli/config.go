@@ -66,7 +66,11 @@ func buildAPIList(nfServices map[string][]types.ServiceMetadata) types.APIList {
 			serviceAPIs := make(map[string]types.APIListEntry)
 
 			for apiName, api := range service.APIs {
-				method := ExtractMethodFromAPI(apiName)
+				// Use actual method from API metadata instead of extracting from name
+				method := "GET" // default
+				if len(api.Methods) > 0 {
+					method = api.Methods[0]
+				}
 				cleanName := CleanAPIName(apiName)
 
 				parameterInfos := buildParameterInfos(api, service)

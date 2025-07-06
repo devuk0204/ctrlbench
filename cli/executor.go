@@ -143,71 +143,6 @@ func (e *APIExecutor) discoverNFURL(globalCfg map[string]interface{}, targetNF s
 	return BuildNFDiscoveryURL(globalCfg, targetNF)
 }
 
-// populateHeaders populates HTTP headers for the request
-func (e *APIExecutor) populateHeaders(execInfo *types.APIExecutionInfo, targetNF string, config map[string]interface{}) {
-	// Set default headers
-	execInfo.Headers["Content-Type"] = "application/json"
-	execInfo.Headers["Accept"] = "application/json"
-
-	// Add NF-specific headers from configuration
-	userInputs, ok := config["user_inputs"].(map[string]interface{})
-	if !ok {
-		fmt.Printf("🔍 DEBUG: No user_inputs found in configuration\n")
-		return
-	}
-
-	nfSettings, ok := userInputs["nf_settings"].(map[string]interface{})
-	if !ok {
-		fmt.Printf("🔍 DEBUG: No nf_settings found in configuration\n")
-		return
-	}
-
-	fmt.Printf("🔍 DEBUG: Looking for NF settings for: %s\n", targetNF)
-
-	if nfConfig, exists := nfSettings[targetNF]; exists {
-		fmt.Printf("🔍 DEBUG: Found NF config for %s\n", targetNF)
-
-		if nfMap, ok := nfConfig.(map[string]interface{}); ok {
-			if customHeaders, exists := nfMap["custom_headers"]; exists {
-				fmt.Printf("🔍 DEBUG: Found custom_headers section\n")
-
-				if headersMap, ok := customHeaders.(map[string]interface{}); ok {
-					for key, value := range headersMap {
-						var headerValue string
-
-						// Handle new configuration format: {value: "..."}
-						if valueMap, ok := value.(map[string]interface{}); ok {
-							if val, exists := valueMap["value"]; exists {
-								headerValue = fmt.Sprintf("%v", val)
-							}
-						} else {
-							// Handle direct string value
-							headerValue = fmt.Sprintf("%v", value)
-						}
-
-						if headerValue != "" {
-							fmt.Printf("🔍 DEBUG: Setting header %s: %s\n", key, headerValue)
-							execInfo.Headers[key] = headerValue
-						} else {
-							fmt.Printf("🔍 DEBUG: Skipping empty header: %s\n", key)
-						}
-					}
-				} else {
-					fmt.Printf("🔍 DEBUG: custom_headers is not a map\n")
-				}
-			} else {
-				fmt.Printf("🔍 DEBUG: No custom_headers found for %s\n", targetNF)
-			}
-		} else {
-			fmt.Printf("🔍 DEBUG: NF config is not a map\n")
-		}
-	} else {
-		fmt.Printf("🔍 DEBUG: No configuration found for NF: %s\n", targetNF)
-	}
-
-	fmt.Printf("🔍 DEBUG: Final headers: %v\n", execInfo.Headers)
-}
-
 // ExecuteHTTPCall performs the actual HTTP call
 func (e *APIExecutor) ExecuteHTTPCall(execInfo *types.APIExecutionInfo) (time.Duration, error) {
 	start := time.Now()
@@ -220,10 +155,6 @@ func (e *APIExecutor) ExecuteHTTPCall(execInfo *types.APIExecutionInfo) (time.Du
 	}
 
 	duration := time.Since(start)
-
-	// Debug output
-	fmt.Printf("🔍 DEBUG: HTTP %s %s -> %d (%v)\n",
-		execInfo.Method, execInfo.DiscoveredURL, result.Status, duration)
 
 	return duration, nil
 }

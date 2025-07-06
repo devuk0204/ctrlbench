@@ -22,11 +22,12 @@ func NewRequestBuilder() *RequestBuilder {
 func (rb *RequestBuilder) PrepareAPIExecution(apiList types.APIList, config map[string]interface{}, nf, apiName string) (*types.APIExecutionInfo, error) {
 	fmt.Printf("🔍 DEBUG: Starting PrepareAPIExecution for NF=%s, API=%s\n", nf, apiName)
 
-	apiInfo, err := rb.GetAPIInfo(apiList, nf, apiName)
+	apiInfo, servicePath, err := rb.GetAPIInfoWithServicePath(apiList, nf, apiName)
 	if err != nil {
 		return nil, err
 	}
 
+	fmt.Printf("🔍 DEBUG: Found API info - Service path: %s, API path: %s\n", servicePath, apiInfo.Path)
 	fmt.Printf("🔍 DEBUG: Found API info - Parameters count: %d\n", len(apiInfo.Parameters))
 	for i, p := range apiInfo.Parameters {
 		fmt.Printf("🔍 DEBUG: Parameter[%d]: Name=%s, Required=%t, Type=%s\n", i, p.Name, p.Required, p.Type)
@@ -108,17 +109,21 @@ func (rb *RequestBuilder) PrepareAPIExecution(apiList types.APIList, config map[
 		requestBody = GetDefaultRequestBodyForType(apiInfo.RequestBody)
 	}
 
+	// Combine service path and API path
+	fullPath := servicePath + apiInfo.Path
+
 	execInfo := &types.APIExecutionInfo{
 		NF:          nf,
 		APIName:     apiName,
 		Method:      apiInfo.Method,
-		Path:        apiInfo.Path,
+		Path:        fullPath,
 		Parameters:  parameters,
 		RequestBody: requestBody,
 		Headers:     make(map[string]string),
 	}
 
 	fmt.Printf("✅ Configuration validation passed - ready for execution\n")
+	fmt.Printf("🔍 DEBUG: Created execInfo with full path: %s (service: %s + api: %s)\n", fullPath, servicePath, apiInfo.Path)
 	fmt.Printf("🔍 DEBUG: Created execInfo with %d parameters\n", len(execInfo.Parameters))
 	return execInfo, nil
 }
@@ -155,30 +160,75 @@ func (rb *RequestBuilder) BuildFinalURL(execInfo *types.APIExecutionInfo) string
 
 // PopulateHeaders populates headers for the API request
 func (rb *RequestBuilder) PopulateHeaders(execInfo *types.APIExecutionInfo, targetNF string, config map[string]interface{}) {
+	fmt.Printf("🔍 DEBUG: PopulateHeaders called for NF: %s\n", targetNF)
+
+	// Initialize headers map if not exists
+	if execInfo.Headers == nil {
+		execInfo.Headers = make(map[string]string)
+	}
+
+	// Set default headers
+	execInfo.Headers["Content-Type"] = "application/json"
+	execInfo.Headers["Accept"] = "application/json"
+	fmt.Printf("🔍 DEBUG: Set default headers\n")
+
 	// Get user inputs for headers
 	userInputs, ok := config["user_inputs"].(map[string]interface{})
 	if !ok {
+		fmt.Printf("🔍 DEBUG: No user_inputs found in configuration\n")
 		return
-	}
-
-	// Global settings headers
-	if globalSettings, ok := userInputs["global_settings"].(map[string]interface{}); ok {
-		for key, value := range globalSettings {
-			if strings.HasSuffix(strings.ToLower(key), "header") || strings.Contains(strings.ToLower(key), "authorization") {
-				execInfo.Headers[key] = GetConfigValue(value)
-			}
-		}
 	}
 
 	// NF-specific headers
 	if nfSettings, ok := userInputs["nf_settings"].(map[string]interface{}); ok {
+		fmt.Printf("🔍 DEBUG: Found nf_settings\n")
+
 		if nfConfig, ok := nfSettings[targetNF].(map[string]interface{}); ok {
-			for key, value := range nfConfig {
-				if strings.HasSuffix(strings.ToLower(key), "header") || strings.Contains(strings.ToLower(key), "authorization") {
-					execInfo.Headers[key] = GetConfigValue(value)
+			fmt.Printf("🔍 DEBUG: Found config for NF: %s\n", targetNF)
+
+			// Look for custom_headers section
+			if customHeaders, exists := nfConfig["custom_headers"]; exists {
+				fmt.Printf("🔍 DEBUG: Found custom_headers section\n")
+
+				if headersMap, ok := customHeaders.(map[string]interface{}); ok {
+					fmt.Printf("🔍 DEBUG: Processing %d custom headers\n", len(headersMap))
+
+					for key, value := range headersMap {
+						var headerValue string
+
+						// Handle new configuration format: {value: "..."}
+						if valueMap, ok := value.(map[string]interface{}); ok {
+							if val, exists := valueMap["value"]; exists {
+								headerValue = fmt.Sprintf("%v", val)
+							}
+						} else {
+							// Handle direct string value
+							headerValue = fmt.Sprintf("%v", value)
+						}
+
+						if headerValue != "" {
+							fmt.Printf("🔍 DEBUG: Setting header %s: %s\n", key, headerValue)
+							execInfo.Headers[key] = headerValue
+						} else {
+							fmt.Printf("🔍 DEBUG: Skipping empty header: %s\n", key)
+						}
+					}
+				} else {
+					fmt.Printf("🔍 DEBUG: custom_headers is not a map\n")
 				}
+			} else {
+				fmt.Printf("🔍 DEBUG: No custom_headers found for %s\n", targetNF)
 			}
+		} else {
+			fmt.Printf("🔍 DEBUG: No config found for NF: %s\n", targetNF)
 		}
+	} else {
+		fmt.Printf("🔍 DEBUG: No nf_settings found\n")
+	}
+
+	fmt.Printf("🔍 DEBUG: Final headers count: %d\n", len(execInfo.Headers))
+	for key, value := range execInfo.Headers {
+		fmt.Printf("🔍 DEBUG: Header[%s] = %s\n", key, value)
 	}
 }
 
@@ -197,6 +247,18 @@ func (rb *RequestBuilder) LoadAPIList() (types.APIList, error) {
 	}
 
 	return apiList, nil
+}
+
+// GetAPIInfoWithServicePath finds API information and service path from tree-structured api_list
+func (rb *RequestBuilder) GetAPIInfoWithServicePath(apiList types.APIList, nf, apiName string) (*types.APIListEntry, string, error) {
+	if nfServices, exists := apiList[nf]; exists {
+		for _, serviceInfo := range nfServices {
+			if api, exists := serviceInfo.APIs[apiName]; exists {
+				return &api, serviceInfo.Path, nil
+			}
+		}
+	}
+	return nil, "", fmt.Errorf("API '%s' not found in NF '%s'", apiName, nf)
 }
 
 // GetAPIInfo finds API information from tree-structured api_list
@@ -255,10 +317,14 @@ func getRequestBodyFieldValue(fieldName, schemaName string, commonBodies, apiSpe
 	if apiSpecificBodies != nil {
 		if schemaConfig, exists := apiSpecificBodies[schemaName]; exists {
 			if schemaMap, ok := schemaConfig.(map[string]interface{}); ok {
-				if fieldConfig, exists := schemaMap[fieldName]; exists {
-					if fieldMap, ok := fieldConfig.(map[string]interface{}); ok {
-						if value, exists := fieldMap["value"]; exists {
-							return value
+				if properties, exists := schemaMap["properties"]; exists {
+					if propertiesMap, ok := properties.(map[string]interface{}); ok {
+						if fieldConfig, exists := propertiesMap[fieldName]; exists {
+							if fieldMap, ok := fieldConfig.(map[string]interface{}); ok {
+								if value, exists := fieldMap["value"]; exists {
+									return value
+								}
+							}
 						}
 					}
 				}
@@ -270,10 +336,14 @@ func getRequestBodyFieldValue(fieldName, schemaName string, commonBodies, apiSpe
 	if commonBodies != nil {
 		if schemaConfig, exists := commonBodies[schemaName]; exists {
 			if schemaMap, ok := schemaConfig.(map[string]interface{}); ok {
-				if fieldConfig, exists := schemaMap[fieldName]; exists {
-					if fieldMap, ok := fieldConfig.(map[string]interface{}); ok {
-						if value, exists := fieldMap["value"]; exists {
-							return value
+				if properties, exists := schemaMap["properties"]; exists {
+					if propertiesMap, ok := properties.(map[string]interface{}); ok {
+						if fieldConfig, exists := propertiesMap[fieldName]; exists {
+							if fieldMap, ok := fieldConfig.(map[string]interface{}); ok {
+								if value, exists := fieldMap["value"]; exists {
+									return value
+								}
+							}
 						}
 					}
 				}

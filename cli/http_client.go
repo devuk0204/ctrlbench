@@ -32,9 +32,13 @@ func NewHTTPClient() *HTTPClient {
 
 // PrepareHTTPRequest creates an HTTP request with proper headers and body
 func (c *HTTPClient) PrepareHTTPRequest(method, url string, body []byte, headers map[string]string) (*http.Request, error) {
+	fmt.Printf("🔍 DEBUG: PrepareHTTPRequest - Method: %s, URL: %s\n", method, url)
+	fmt.Printf("🔍 DEBUG: PrepareHTTPRequest - Headers count: %d\n", len(headers))
+
 	var bodyReader io.Reader
 	if body != nil {
 		bodyReader = bytes.NewReader(body)
+		fmt.Printf("🔍 DEBUG: PrepareHTTPRequest - Body size: %d bytes\n", len(body))
 	}
 
 	req, err := http.NewRequest(method, url, bodyReader)
@@ -45,10 +49,19 @@ func (c *HTTPClient) PrepareHTTPRequest(method, url string, body []byte, headers
 	// Set default headers
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
+	fmt.Printf("🔍 DEBUG: PrepareHTTPRequest - Set default headers\n")
 
 	// Set custom headers
 	for key, value := range headers {
 		req.Header.Set(key, value)
+		fmt.Printf("🔍 DEBUG: PrepareHTTPRequest - Set header[%s] = %s\n", key, value)
+	}
+
+	fmt.Printf("🔍 DEBUG: PrepareHTTPRequest - Final request headers:\n")
+	for key, values := range req.Header {
+		for _, value := range values {
+			fmt.Printf("🔍 DEBUG: Request Header[%s] = %s\n", key, value)
+		}
 	}
 
 	return req, nil
@@ -119,15 +132,22 @@ func (c *HTTPClient) ExecuteWithResult(execInfo *types.APIExecutionInfo, workerI
 	}
 
 	// Execute HTTP request
-	resp, _, err := c.ExecuteHTTPRequest(execInfo.Method, finalURL, bodyBytes, execInfo.Headers)
+	resp, respBody, err := c.ExecuteHTTPRequest(execInfo.Method, finalURL, bodyBytes, execInfo.Headers)
 	result.Duration = time.Since(start)
 
 	if err != nil {
 		result.Error = err
+		fmt.Printf("🔍 DEBUG: HTTP %s %s -> ERROR (%v): %v\n", execInfo.Method, finalURL, result.Duration, err)
 		return result
 	}
 
 	result.Status = resp.StatusCode
+
+	// Debug output with full URL and response details
+	fmt.Printf("🔍 DEBUG: HTTP %s %s -> %d (%v)\n", execInfo.Method, finalURL, resp.StatusCode, result.Duration)
+	if respBody != nil && len(respBody) > 0 {
+		fmt.Printf("📋 DEBUG: Response Body: %s\n", string(respBody))
+	}
 
 	return result
 }
