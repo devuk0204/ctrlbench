@@ -135,9 +135,7 @@ func (rb *RequestBuilder) BuildFinalURL(execInfo *types.APIExecutionInfo) string
 	path := execInfo.Path
 
 	// Remove trailing slash from base URL if exists
-	if strings.HasSuffix(baseURL, "/") {
-		baseURL = strings.TrimSuffix(baseURL, "/")
-	}
+	baseURL = strings.TrimSuffix(baseURL, "/")
 
 	// Ensure path starts with slash
 	if !strings.HasPrefix(path, "/") {
@@ -154,14 +152,95 @@ func (rb *RequestBuilder) BuildFinalURL(execInfo *types.APIExecutionInfo) string
 
 // PopulateHeaders populates HTTP headers for the request
 func (rb *RequestBuilder) PopulateHeaders(execInfo *types.APIExecutionInfo, targetNF string, config map[string]interface{}) error {
+	fmt.Printf("🔍 DEBUG: PopulateHeaders - targetNF: %s\n", targetNF)
+
 	// Initialize headers map if nil
 	if execInfo.Headers == nil {
 		execInfo.Headers = make(map[string]string)
 	}
 
-	// Set default headers
-	execInfo.Headers["Content-Type"] = "application/json"
-	execInfo.Headers["Accept"] = "application/json"
+	// Get user inputs and NF settings
+	userInputs, ok := config["user_inputs"].(map[string]interface{})
+	if !ok {
+		fmt.Printf("❌ DEBUG: user_inputs not found in configuration\n")
+		// Set default headers and return
+		execInfo.Headers["Content-Type"] = "application/json"
+		execInfo.Headers["Accept"] = "application/json"
+		return nil
+	}
+
+	nfSettings, ok := userInputs["nf_settings"].(map[string]interface{})
+	if !ok {
+		fmt.Printf("❌ DEBUG: nf_settings not found in configuration\n")
+		// Set default headers and return
+		execInfo.Headers["Content-Type"] = "application/json"
+		execInfo.Headers["Accept"] = "application/json"
+		return nil
+	}
+
+	fmt.Printf("🔍 DEBUG: Available NF settings: %v\n", getMapKeys(nfSettings))
+
+	// Get specific NF settings
+	targetNFSettings, ok := nfSettings[targetNF].(map[string]interface{})
+	if !ok {
+		fmt.Printf("❌ DEBUG: %s settings not found, using defaults\n", targetNF)
+		// Set default headers and return
+		execInfo.Headers["Content-Type"] = "application/json"
+		execInfo.Headers["Accept"] = "application/json"
+		return nil
+	}
+
+	fmt.Printf("🔍 DEBUG: Found %s settings: %v\n", targetNF, getMapKeys(targetNFSettings))
+
+	// Get custom headers for this NF
+	customHeaders, ok := targetNFSettings["custom_headers"].(map[string]interface{})
+	if !ok {
+		fmt.Printf("❌ DEBUG: custom_headers not found for %s, using defaults\n", targetNF)
+		// Set default headers and return
+		execInfo.Headers["Content-Type"] = "application/json"
+		execInfo.Headers["Accept"] = "application/json"
+		return nil
+	}
+
+	fmt.Printf("🔍 DEBUG: Found custom headers: %v\n", getMapKeys(customHeaders))
+
+	// Process each custom header
+	for headerName, headerConfig := range customHeaders {
+		fmt.Printf("🔍 DEBUG: Processing header: %s\n", headerName)
+
+		headerConfigMap, ok := headerConfig.(map[string]interface{})
+		if !ok {
+			fmt.Printf("❌ DEBUG: Invalid header config for %s\n", headerName)
+			continue
+		}
+
+		// Extract the header value
+		if value, exists := headerConfigMap["value"]; exists {
+			if valueStr, ok := value.(string); ok && valueStr != "" {
+				execInfo.Headers[headerName] = valueStr
+				fmt.Printf("✅ DEBUG: Set header %s = %s\n", headerName, valueStr)
+			} else {
+				fmt.Printf("❌ DEBUG: Invalid value for header %s: %v (type: %T)\n", headerName, value, value)
+			}
+		} else {
+			fmt.Printf("❌ DEBUG: No value found for header %s\n", headerName)
+		}
+	}
+
+	// Set default headers if not already set by custom headers
+	if _, exists := execInfo.Headers["Content-Type"]; !exists {
+		execInfo.Headers["Content-Type"] = "application/json"
+		fmt.Printf("🔍 DEBUG: Set default Content-Type\n")
+	}
+	if _, exists := execInfo.Headers["Accept"]; !exists {
+		execInfo.Headers["Accept"] = "application/json"
+		fmt.Printf("🔍 DEBUG: Set default Accept\n")
+	}
+
+	fmt.Printf("🔍 DEBUG: Final headers count: %d\n", len(execInfo.Headers))
+	for k, v := range execInfo.Headers {
+		fmt.Printf("🔍 DEBUG: Final header[%s] = %s\n", k, v)
+	}
 
 	return nil
 }
