@@ -30,6 +30,7 @@ type APIExecutionInfo struct {
 	Method        string            `json:"method"`
 	Path          string            `json:"path"`
 	DiscoveredURL string            `json:"discovered_url"`
+	FinalURL      string            `json:"final_url"`
 	Parameters    map[string]string `json:"parameters"`
 	RequestBody   interface{}       `json:"request_body"`
 	Headers       map[string]string `json:"headers"`
@@ -44,4 +45,12 @@ type ExecutionResult struct {
 	Latency     time.Duration          `json:"latency"`
 	Timestamp   time.Time              `json:"timestamp"`
 	RequestInfo APIExecutionInfo       `json:"request_info"`
+}
+
+// HTTPResult represents the result of an HTTP request execution
+type HTTPResult struct {
+	Duration     time.Duration
+	StatusCode   int
+	ResponseBody string
+	Error        error
 }

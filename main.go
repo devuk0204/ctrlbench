@@ -100,7 +100,8 @@ func handleAPIExecution() {
 	printExecutionDetails(execInfo)
 
 	// Execute benchmark based on flags
-	if *concurrency > 1 || *duration > 0 {
+	// Only use concurrent benchmark when -c flag is explicitly set > 1
+	if *concurrency > 1 {
 		runConcurrentBenchmark(executor, execInfo)
 	} else {
 		runSequentialBenchmark(executor, execInfo)
@@ -140,7 +141,12 @@ func runConcurrentBenchmark(executor *cli.APIExecutor, execInfo *types.APIExecut
 
 // runSequentialBenchmark executes sequential benchmark
 func runSequentialBenchmark(executor *cli.APIExecutor, execInfo *types.APIExecutionInfo) {
-	result, err := executor.RunBenchmark(execInfo, *iterationsFlag)
+	result, err := executor.RunBenchmark(
+		execInfo,
+		*iterationsFlag,
+		time.Duration(*duration)*time.Second,
+		*rateLimit,
+	)
 	if err != nil {
 		log.Fatalf("Benchmark failed: %v", err)
 	}
@@ -150,7 +156,7 @@ func runSequentialBenchmark(executor *cli.APIExecutor, execInfo *types.APIExecut
 // printResults prints sequential benchmark results
 func printResults(result *types.BenchmarkResult) {
 	fmt.Println("\n" + strings.Repeat("=", 60))
-	fmt.Println("  BENCHMARK RESULTS")
+	fmt.Println("  SEQUENTIAL BENCHMARK RESULTS")
 	fmt.Println(strings.Repeat("=", 60))
 
 	successRate := float64(result.SuccessCount) / float64(result.TotalRequests) * 100
@@ -159,13 +165,21 @@ func printResults(result *types.BenchmarkResult) {
 	fmt.Printf("Successful: %d\n", result.SuccessCount)
 	fmt.Printf("Failed: %d\n", result.FailureCount)
 	fmt.Printf("Success Rate: %.2f%%\n", successRate)
-	fmt.Printf("Throughput: %.2f RPS\n", result.RequestsPerSecond)
+	fmt.Printf("Total Duration: %v\n", result.TotalTime)
 	fmt.Println()
+
 	fmt.Printf("Response Times:\n")
 	fmt.Printf("Average: %v\n", result.AvgTime)
 	fmt.Printf("Minimum: %v\n", result.MinTime)
 	fmt.Printf("Maximum: %v\n", result.MaxTime)
-	fmt.Printf("Total Duration: %v\n", result.TotalTime)
+
+	// Add error distribution for sequential benchmark too
+	if len(result.ErrorDistribution) > 0 {
+		fmt.Printf("\nError Distribution:\n")
+		for errorType, count := range result.ErrorDistribution {
+			fmt.Printf("%s: %d\n", errorType, count)
+		}
+	}
 }
 
 // printConcurrentResults prints concurrent benchmark results
@@ -187,11 +201,11 @@ func printConcurrentResults(result *types.BenchmarkResult) {
 
 	if result.Percentiles != nil {
 		fmt.Printf("\nPercentiles:\n")
-		fmt.Printf("50th: %v\n", result.Percentiles["50th"])
-		fmt.Printf("75th: %v\n", result.Percentiles["75th"])
-		fmt.Printf("90th: %v\n", result.Percentiles["90th"])
-		fmt.Printf("95th: %v\n", result.Percentiles["95th"])
-		fmt.Printf("99th: %v\n", result.Percentiles["99th"])
+		fmt.Printf("50%%: %v\n", result.Percentiles["50th"])
+		fmt.Printf("75%%: %v\n", result.Percentiles["75th"])
+		fmt.Printf("90%%: %v\n", result.Percentiles["90th"])
+		fmt.Printf("95%%: %v\n", result.Percentiles["95th"])
+		fmt.Printf("99%%: %v\n", result.Percentiles["99th"])
 	}
 
 	if len(result.ErrorDistribution) > 0 {

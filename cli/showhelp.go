@@ -10,19 +10,40 @@ import (
 // PrintUsage prints usage information
 func PrintUsage() {
 	fmt.Println("💡 Usage:")
-	fmt.Println("    ctrlbench -t NF_NAME -a \"API_NAME\" -i 100")
+	fmt.Println("    ctrlbench -t NF_NAME -a \"API_NAME\" [OPTIONS]")
 	fmt.Println("    ctrlbench -h              # Show usage only")
 	fmt.Println("    ctrlbench -h all          # Show all NFs and APIs")
 	fmt.Println("    ctrlbench -h NF_NAME      # Show specific NF APIs")
 	fmt.Println("    ctrlbench -b              # Build configuration file for all NFs")
 	fmt.Println("    ctrlbench -b NF_NAME      # Build configuration file for specific NF")
 	fmt.Println()
-	fmt.Println("Examples:")
-	fmt.Println("    ctrlbench -t AUSF -a \"CreateUe-Authentications\" -i 10")
-	fmt.Println("    ctrlbench -t UDM -a \"GetSubscription-data\" -i 5")
+
+	fmt.Println("📊 Benchmark Options:")
+	fmt.Println("    -i INT        Number of iterations (default: 1)")
+	fmt.Println("    -d INT        Duration in seconds (overrides iterations)")
+	fmt.Println("    -r INT        Rate limit (requests per second)")
+	fmt.Println("    -c INT        Concurrent connections (enables load testing)")
 	fmt.Println()
-	fmt.Println("Note: You must build the configuration file first using -b option before executing APIs.")
-	fmt.Println("Note: NRF URL must be configured in configuration.yaml")
+
+	fmt.Println("📋 Sequential Benchmark Examples:")
+	fmt.Println("    ctrlbench -t AUSF -a \"PostUeAuthentications\" -i 10")
+	fmt.Println("    ctrlbench -t AUSF -a \"PostUeAuthentications\" -d 30")
+	fmt.Println("    ctrlbench -t AUSF -a \"PostUeAuthentications\" -d 30 -r 5")
+	fmt.Println("    ctrlbench -t UDM -a \"GetSubscriptionData\" -i 5 -r 2")
+	fmt.Println()
+
+	fmt.Println("🚀 Concurrent Load Testing Examples:")
+	fmt.Println("    ctrlbench -t AUSF -a \"PostUeAuthentications\" -c 10 -d 30")
+	fmt.Println("    ctrlbench -t AUSF -a \"PostUeAuthentications\" -c 5 -d 60 -r 10")
+	fmt.Println("    ctrlbench -t UDM -a \"GetSubscriptionData\" -c 20 -d 120")
+	fmt.Println()
+
+	fmt.Println("📝 Notes:")
+	fmt.Println("    • Build configuration file first using -b option before executing APIs")
+	fmt.Println("    • Configure NRF URL in configuration.yaml")
+	fmt.Println("    • Use -c option for concurrent load testing")
+	fmt.Println("    • Use -d for time-based execution, -i for iteration-based")
+	fmt.Println("    • Rate limiting (-r) works with both sequential and concurrent modes")
 }
 
 // ShowHelp displays help information for services and APIs

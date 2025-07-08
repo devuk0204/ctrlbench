@@ -128,41 +128,33 @@ func (rb *RequestBuilder) PrepareAPIExecution(apiList types.APIList, config map[
 	return execInfo, nil
 }
 
-// BuildFinalURL constructs the final URL with parameters
+// BuildFinalURL builds the complete URL from discovered URL and path
 func (rb *RequestBuilder) BuildFinalURL(execInfo *types.APIExecutionInfo) string {
-	finalURL := execInfo.DiscoveredURL + execInfo.Path
+	// Make sure we use the discovered URL as base
+	baseURL := execInfo.DiscoveredURL
+	path := execInfo.Path
 
-	// Replace path parameters
-	for key, value := range execInfo.Parameters {
-		placeholder := "{" + key + "}"
-		if strings.Contains(finalURL, placeholder) {
-			finalURL = strings.ReplaceAll(finalURL, placeholder, value)
-		}
+	// Remove trailing slash from base URL if exists
+	if strings.HasSuffix(baseURL, "/") {
+		baseURL = strings.TrimSuffix(baseURL, "/")
 	}
 
-	// Add query parameters
-	if len(execInfo.Parameters) > 0 {
-		queryParams := make([]string, 0)
-		for key, value := range execInfo.Parameters {
-			placeholder := "{" + key + "}"
-			if !strings.Contains(execInfo.Path, placeholder) {
-				queryParams = append(queryParams, fmt.Sprintf("%s=%s", key, value))
-			}
-		}
-
-		if len(queryParams) > 0 {
-			finalURL += "?" + strings.Join(queryParams, "&")
-		}
+	// Ensure path starts with slash
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
 	}
+
+	finalURL := baseURL + path
+
+	// Debug output
+	fmt.Printf("🔍 DEBUG: BuildFinalURL - Base: %s, Path: %s, Final: %s\n", baseURL, path, finalURL)
 
 	return finalURL
 }
 
-// PopulateHeaders populates headers for the API request
-func (rb *RequestBuilder) PopulateHeaders(execInfo *types.APIExecutionInfo, targetNF string, config map[string]interface{}) {
-	fmt.Printf("🔍 DEBUG: PopulateHeaders called for NF: %s\n", targetNF)
-
-	// Initialize headers map if not exists
+// PopulateHeaders populates HTTP headers for the request
+func (rb *RequestBuilder) PopulateHeaders(execInfo *types.APIExecutionInfo, targetNF string, config map[string]interface{}) error {
+	// Initialize headers map if nil
 	if execInfo.Headers == nil {
 		execInfo.Headers = make(map[string]string)
 	}
@@ -170,66 +162,8 @@ func (rb *RequestBuilder) PopulateHeaders(execInfo *types.APIExecutionInfo, targ
 	// Set default headers
 	execInfo.Headers["Content-Type"] = "application/json"
 	execInfo.Headers["Accept"] = "application/json"
-	fmt.Printf("🔍 DEBUG: Set default headers\n")
 
-	// Get user inputs for headers
-	userInputs, ok := config["user_inputs"].(map[string]interface{})
-	if !ok {
-		fmt.Printf("🔍 DEBUG: No user_inputs found in configuration\n")
-		return
-	}
-
-	// NF-specific headers
-	if nfSettings, ok := userInputs["nf_settings"].(map[string]interface{}); ok {
-		fmt.Printf("🔍 DEBUG: Found nf_settings\n")
-
-		if nfConfig, ok := nfSettings[targetNF].(map[string]interface{}); ok {
-			fmt.Printf("🔍 DEBUG: Found config for NF: %s\n", targetNF)
-
-			// Look for custom_headers section
-			if customHeaders, exists := nfConfig["custom_headers"]; exists {
-				fmt.Printf("🔍 DEBUG: Found custom_headers section\n")
-
-				if headersMap, ok := customHeaders.(map[string]interface{}); ok {
-					fmt.Printf("🔍 DEBUG: Processing %d custom headers\n", len(headersMap))
-
-					for key, value := range headersMap {
-						var headerValue string
-
-						// Handle new configuration format: {value: "..."}
-						if valueMap, ok := value.(map[string]interface{}); ok {
-							if val, exists := valueMap["value"]; exists {
-								headerValue = fmt.Sprintf("%v", val)
-							}
-						} else {
-							// Handle direct string value
-							headerValue = fmt.Sprintf("%v", value)
-						}
-
-						if headerValue != "" {
-							fmt.Printf("🔍 DEBUG: Setting header %s: %s\n", key, headerValue)
-							execInfo.Headers[key] = headerValue
-						} else {
-							fmt.Printf("🔍 DEBUG: Skipping empty header: %s\n", key)
-						}
-					}
-				} else {
-					fmt.Printf("🔍 DEBUG: custom_headers is not a map\n")
-				}
-			} else {
-				fmt.Printf("🔍 DEBUG: No custom_headers found for %s\n", targetNF)
-			}
-		} else {
-			fmt.Printf("🔍 DEBUG: No config found for NF: %s\n", targetNF)
-		}
-	} else {
-		fmt.Printf("🔍 DEBUG: No nf_settings found\n")
-	}
-
-	fmt.Printf("🔍 DEBUG: Final headers count: %d\n", len(execInfo.Headers))
-	for key, value := range execInfo.Headers {
-		fmt.Printf("🔍 DEBUG: Header[%s] = %s\n", key, value)
-	}
+	return nil
 }
 
 // LoadAPIList loads api_list.yaml file

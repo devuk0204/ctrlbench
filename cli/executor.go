@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -21,6 +20,16 @@ type APIExecutor struct {
 	httpClient      *HTTPClient
 	requestBuilder  *RequestBuilder
 	benchmarkRunner *BenchmarkRunner
+}
+
+// RequestResult represents individual request result for concurrent benchmarking
+type RequestResult struct {
+	Duration     time.Duration
+	StatusCode   int
+	Error        error
+	WorkerID     int
+	Timestamp    time.Time
+	ResponseBody string
 }
 
 // NewAPIExecutor creates a new API executor
@@ -83,59 +92,25 @@ func (e *APIExecutor) ExecuteAPI(targetNF, apiName string) (*types.APIExecutionI
 		fmt.Printf("✅ Discovered %s URL: %s\n", targetNF, discoveredURL)
 	}
 
-	execInfo.DiscoveredURL = discoveredURL
-
-	// Populate headers
 	e.requestBuilder.PopulateHeaders(execInfo, targetNF, config)
 
-	// Build and display final URL once
+	// Print header debug info once here
+	fmt.Printf("🔍 DEBUG: Request headers:\n")
+	fmt.Printf("🔍 DEBUG: Headers count: %d\n", len(execInfo.Headers))
+	for key, value := range execInfo.Headers {
+		fmt.Printf("🔍 DEBUG: Header[%s] = %s\n", key, value)
+	}
+
+	// Build and store final URL
+	execInfo.DiscoveredURL = discoveredURL // 이 라인이 누락되었을 수 있음
 	finalURL := e.requestBuilder.BuildFinalURL(execInfo)
+	execInfo.FinalURL = finalURL
 	fmt.Printf("🔗 Final URL: %s\n", finalURL)
+	if !strings.HasPrefix(finalURL, "http://") && !strings.HasPrefix(finalURL, "https://") {
+		return nil, fmt.Errorf("invalid URL format: %s", finalURL)
+	}
 
 	return execInfo, nil
-}
-
-// buildFinalURL constructs the complete URL for the API call
-func (e *APIExecutor) buildFinalURL(execInfo *types.APIExecutionInfo) string {
-	// Replace path parameters in the URL
-	finalPath := execInfo.Path
-	queryParams := make(map[string]string)
-
-	// Separate path and query parameters
-	for paramName, paramValue := range execInfo.Parameters {
-		if paramValue == "" {
-			continue // Skip empty parameters
-		}
-
-		// Check if this is a path parameter
-		placeholder := fmt.Sprintf("{%s}", paramName)
-		if strings.Contains(finalPath, placeholder) {
-			// Path parameter - replace in URL path
-			finalPath = strings.ReplaceAll(finalPath, placeholder, paramValue)
-		} else {
-			// Query parameter - add to query string
-			queryParams[paramName] = paramValue
-		}
-	}
-
-	// Get service path from api_list.yaml
-	servicePath := e.getServicePath(execInfo.NF, execInfo.APIName)
-
-	// Build base URL: NF Discovery URL + Service Path + API Path
-	baseURL := strings.TrimSuffix(execInfo.DiscoveredURL, "/")
-	apiPath := strings.TrimPrefix(finalPath, "/")
-	fullURL := fmt.Sprintf("%s%s/%s", baseURL, servicePath, apiPath)
-
-	// Add query parameters if any
-	if len(queryParams) > 0 {
-		queryValues := url.Values{}
-		for key, value := range queryParams {
-			queryValues.Set(key, value)
-		}
-		fullURL += "?" + queryValues.Encode()
-	}
-
-	return fullURL
 }
 
 // discoverNFURL discovers NF URL using NRF
@@ -145,8 +120,6 @@ func (e *APIExecutor) discoverNFURL(globalCfg map[string]interface{}, targetNF s
 
 // ExecuteHTTPCall performs the actual HTTP call
 func (e *APIExecutor) ExecuteHTTPCall(execInfo *types.APIExecutionInfo) (time.Duration, error) {
-	start := time.Now()
-
 	// Use the new HTTPClient to execute the request
 	result := e.httpClient.ExecuteWithResult(execInfo, 0)
 
@@ -154,63 +127,83 @@ func (e *APIExecutor) ExecuteHTTPCall(execInfo *types.APIExecutionInfo) (time.Du
 		return 0, result.Error
 	}
 
-	duration := time.Since(start)
+	return result.Duration, nil
 
-	return duration, nil
 }
 
-// getServicePath retrieves service path from api_list.yaml
-func (e *APIExecutor) getServicePath(nf, apiName string) string {
-	apiList, err := e.requestBuilder.LoadAPIList()
-	if err != nil {
-		fmt.Printf("⚠️  Failed to load API list: %v\n", err)
-		return ""
+// RunBenchmark runs benchmark for specified iterations or duration
+func (e *APIExecutor) RunBenchmark(execInfo *types.APIExecutionInfo, iterations int, duration time.Duration, rateLimit int) (*types.BenchmarkResult, error) {
+	fmt.Printf("🚀 Starting sequential benchmark:\n")
+	if duration > 0 {
+		fmt.Printf("   Duration: %v\n", duration)
+	} else {
+		fmt.Printf("   Iterations: %d\n", iterations)
+	}
+	if rateLimit > 0 {
+		fmt.Printf("   Rate Limit: %d req/s\n", rateLimit)
 	}
 
-	if nfServices, exists := apiList[nf]; exists {
-		for _, serviceInfo := range nfServices {
-			if _, exists := serviceInfo.APIs[apiName]; exists {
-				return serviceInfo.Path
+	// Rate limiter
+	var rateLimiter <-chan time.Time
+	if rateLimit > 0 {
+		rateLimiter = time.Tick(time.Second / time.Duration(rateLimit))
+	}
+
+	var endTime time.Time
+	if duration > 0 {
+		endTime = time.Now().Add(duration)
+	}
+
+	var result types.BenchmarkResult
+	var totalTime time.Duration
+	var minTime, maxTime time.Duration
+
+	requestCount := 0
+	startTime := time.Now()
+
+	for {
+		// 종료 조건 체크
+		if duration > 0 {
+			if time.Now().After(endTime) {
+				break
+			}
+		} else {
+			if requestCount >= iterations {
+				break
+			}
+		}
+
+		// Rate limiting
+		if rateLimiter != nil {
+			<-rateLimiter
+		}
+
+		requestCount++
+
+		// HTTP 요청 실행
+		duration, err := e.ExecuteHTTPCall(execInfo)
+
+		if err != nil {
+			result.FailureCount++
+			fmt.Printf("❌ Request %d failed: %v\n", requestCount, err)
+		} else {
+			result.SuccessCount++
+			totalTime += duration
+			fmt.Printf("✅ Request %d completed in %v\n", requestCount, duration)
+
+			// Track min/max times
+			if result.SuccessCount == 1 || duration < minTime {
+				minTime = duration
+			}
+			if result.SuccessCount == 1 || duration > maxTime {
+				maxTime = duration
 			}
 		}
 	}
 
-	// Fallback: generate default service path
-	nfLower := strings.ToLower(nf)
-	return fmt.Sprintf("/n%s-auth/v1", nfLower)
-}
-
-// RunBenchmark runs benchmark for specified iterations
-func (e *APIExecutor) RunBenchmark(execInfo *types.APIExecutionInfo, iterations int) (*types.BenchmarkResult, error) {
-	result := &types.BenchmarkResult{
-		TotalRequests: iterations,
-	}
-
-	var totalTime time.Duration
-	var minTime, maxTime time.Duration
-
-	for i := 1; i <= iterations; i++ {
-		duration, err := e.ExecuteHTTPCall(execInfo)
-		totalTime += duration
-
-		if err != nil {
-			result.FailureCount++
-			fmt.Printf("❌ Request %d failed: %v\n", i, err)
-		} else {
-			result.SuccessCount++
-			fmt.Printf("✅ Request %d completed in %v\n", i, duration)
-		}
-
-		// Track min/max times
-		if i == 1 || duration < minTime {
-			minTime = duration
-		}
-		if i == 1 || duration > maxTime {
-			maxTime = duration
-		}
-	}
-
-	result.TotalTime = totalTime
+	actualDuration := time.Since(startTime)
+	result.TotalRequests = requestCount
+	result.TotalTime = actualDuration
 	result.MinTime = minTime
 	result.MaxTime = maxTime
 
@@ -218,16 +211,9 @@ func (e *APIExecutor) RunBenchmark(execInfo *types.APIExecutionInfo, iterations 
 		result.AvgTime = totalTime / time.Duration(result.SuccessCount)
 	}
 
-	return result, nil
-}
+	result.RequestsPerSecond = float64(result.TotalRequests) / actualDuration.Seconds()
 
-// RequestResult represents individual request result for concurrent benchmarking
-type RequestResult struct {
-	Duration  time.Duration
-	Error     error
-	Status    int
-	WorkerID  int
-	Timestamp time.Time
+	return &result, nil
 }
 
 // RunConcurrentBenchmark runs benchmark with concurrent connections like wrk
@@ -288,6 +274,7 @@ func (e *APIExecutor) RunConcurrentBenchmark(execInfo *types.APIExecutionInfo, c
 				if time.Now().After(endTime) {
 					break
 				}
+				fmt.Printf("%+v\n", result)
 			}
 		}(i)
 	}
@@ -306,7 +293,8 @@ func (e *APIExecutor) RunConcurrentBenchmark(execInfo *types.APIExecutionInfo, c
 func (e *APIExecutor) executeRequestWithClient(execInfo *types.APIExecutionInfo, client *http.Client, workerID int) *RequestResult {
 	start := time.Now()
 
-	fullURL := e.buildFinalURL(execInfo)
+	// Use pre-built final URL from execInfo
+	fullURL := execInfo.FinalURL
 
 	var requestBody []byte
 	if execInfo.RequestBody != nil {
@@ -314,10 +302,12 @@ func (e *APIExecutor) executeRequestWithClient(execInfo *types.APIExecutionInfo,
 		requestBody, err = json.Marshal(execInfo.RequestBody)
 		if err != nil {
 			return &RequestResult{
-				Duration:  time.Since(start),
-				Error:     err,
-				WorkerID:  workerID,
-				Timestamp: start,
+				Duration:     0,
+				StatusCode:   0,
+				Error:        err,
+				WorkerID:     workerID,
+				Timestamp:    start,
+				ResponseBody: "",
 			}
 		}
 	}
@@ -325,10 +315,12 @@ func (e *APIExecutor) executeRequestWithClient(execInfo *types.APIExecutionInfo,
 	req, err := http.NewRequest(execInfo.Method, fullURL, bytes.NewBuffer(requestBody))
 	if err != nil {
 		return &RequestResult{
-			Duration:  time.Since(start),
-			Error:     err,
-			WorkerID:  workerID,
-			Timestamp: start,
+			Duration:     0,
+			StatusCode:   0,
+			Error:        err,
+			WorkerID:     workerID,
+			Timestamp:    start,
+			ResponseBody: "",
 		}
 	}
 
@@ -336,25 +328,36 @@ func (e *APIExecutor) executeRequestWithClient(execInfo *types.APIExecutionInfo,
 		req.Header.Set(key, value)
 	}
 
+	httpStart := time.Now()
 	resp, err := client.Do(req)
+	httpDuration := time.Since(httpStart)
+
 	if err != nil {
 		return &RequestResult{
-			Duration:  time.Since(start),
-			Error:     err,
-			WorkerID:  workerID,
-			Timestamp: start,
+			Duration:     httpDuration,
+			StatusCode:   0,
+			Error:        err,
+			WorkerID:     workerID,
+			Timestamp:    start,
+			ResponseBody: "",
 		}
 	}
 	defer resp.Body.Close()
 
-	// Read response body to complete request
-	_, _ = io.ReadAll(resp.Body)
+	// Read response body
+	bodyBytes, readErr := io.ReadAll(resp.Body)
+	responseBody := ""
+	if readErr == nil {
+		responseBody = string(bodyBytes)
+	}
 
 	return &RequestResult{
-		Duration:  time.Since(start),
-		Status:    resp.StatusCode,
-		WorkerID:  workerID,
-		Timestamp: start,
+		Duration:     httpDuration,
+		StatusCode:   resp.StatusCode, // Status -> StatusCode
+		Error:        readErr,
+		WorkerID:     workerID,
+		Timestamp:    start,
+		ResponseBody: responseBody,
 	}
 }
 
@@ -370,13 +373,18 @@ func (e *APIExecutor) collectConcurrentResults(results <-chan *RequestResult, st
 		allDurations = append(allDurations, result.Duration)
 		totalTime += result.Duration
 
+		// Print response body for each worker result
+		if result.ResponseBody != "" {
+			fmt.Printf("Worker %d Response (Status: %d): %s\n", result.WorkerID, result.StatusCode, result.ResponseBody)
+		}
+
 		if result.Error != nil {
 			failureCount++
 			errorType := fmt.Sprintf("Error: %v", result.Error)
 			errorDistribution[errorType]++
-		} else if result.Status >= 400 {
+		} else if result.StatusCode >= 400 {
 			failureCount++
-			errorType := fmt.Sprintf("HTTP %d", result.Status)
+			errorType := fmt.Sprintf("HTTP %d", result.StatusCode)
 			errorDistribution[errorType]++
 		} else {
 			successCount++

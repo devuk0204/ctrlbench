@@ -40,14 +40,14 @@ func (b *BenchmarkRunner) RunSequentialBenchmark(execInfo *types.APIExecutionInf
 			failureCount++
 			errorDistribution[result.Error.Error()]++
 			fmt.Printf("❌ Request %d failed: %v\n", i+1, result.Error)
-		} else if result.Status >= 200 && result.Status < 300 {
+		} else if result.StatusCode >= 200 && result.StatusCode < 300 {
 			successCount++
-			fmt.Printf("✅ Request %d: %d - %v\n", i+1, result.Status, result.Duration)
+			fmt.Printf("✅ Request %d: %d - %v\n", i+1, result.StatusCode, result.Duration)
 		} else {
 			failureCount++
-			errorMsg := fmt.Sprintf("HTTP %d", result.Status)
+			errorMsg := fmt.Sprintf("HTTP %d", result.StatusCode)
 			errorDistribution[errorMsg]++
-			fmt.Printf("⚠️  Request %d: %d - %v\n", i+1, result.Status, result.Duration)
+			fmt.Printf("⚠️  Request %d: %d - %v\n", i+1, result.StatusCode, result.Duration)
 		}
 	}
 
@@ -92,8 +92,14 @@ func (b *BenchmarkRunner) RunConcurrentBenchmark(execInfo *types.APIExecutionInf
 					<-ticker.C
 				}
 
-				result := b.httpClient.ExecuteWithResult(execInfo, workerID)
-				results <- result
+				httpResult := b.httpClient.ExecuteWithResult(execInfo, workerID)
+				// Convert *HTTPResult to *RequestResult
+				requestResult := &RequestResult{
+					Duration:   httpResult.Duration,
+					Error:      httpResult.Error,
+					StatusCode: httpResult.StatusCode,
+				}
+				results <- requestResult
 			}
 		}(i)
 	}
@@ -161,11 +167,11 @@ func (b *BenchmarkRunner) collectConcurrentResults(results <-chan *RequestResult
 		if result.Error != nil {
 			failureCount++
 			errorDistribution[result.Error.Error()]++
-		} else if result.Status >= 200 && result.Status < 300 {
+		} else if result.StatusCode >= 200 && result.StatusCode < 300 {
 			successCount++
 		} else {
 			failureCount++
-			errorMsg := fmt.Sprintf("HTTP %d", result.Status)
+			errorMsg := fmt.Sprintf("HTTP %d", result.StatusCode)
 			errorDistribution[errorMsg]++
 		}
 
