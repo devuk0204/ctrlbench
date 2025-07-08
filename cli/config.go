@@ -12,43 +12,96 @@ import (
 	"github.com/devuk0204/ctrlbench/types"
 )
 
-// BuildConfiguration creates configuration.yaml and api_list.yaml
-func BuildConfiguration(services map[string]types.ServiceMetadata, nfFilter string) error {
-	nfServices := groupServicesByNF(services, nfFilter)
+// BuildConfiguration builds configuration file for specified NFs or all NFs
+func BuildConfiguration(services map[string]types.ServiceMetadata, nfFilters []string) error {
+	fmt.Println("🔧 Building configuration file...")
 
-	if len(nfServices) == 0 {
-		return fmt.Errorf("no services found for NF filter: %s", nfFilter)
+	if len(nfFilters) == 0 {
+		// Build for all NFs
+		fmt.Println("📋 Building configuration for all Network Functions")
+		return buildConfigurationForAllNFs(services)
+	} else {
+		// Build for specified NFs
+		fmt.Printf("📋 Building configuration for specified NFs: %v\n", nfFilters)
+		return buildConfigurationForSpecificNFs(services, nfFilters)
 	}
+}
+
+// buildConfigurationForSpecificNFs builds configuration for multiple specified NFs
+func buildConfigurationForSpecificNFs(services map[string]types.ServiceMetadata, nfFilters []string) error {
+	nfServices := GroupServicesByNF(services)
+
+	// Validate all NF filters first
+	var validNFs []string
+	var invalidNFs []string
+
+	for _, nfFilter := range nfFilters {
+		found := false
+		for nf := range nfServices {
+			if strings.EqualFold(nf, nfFilter) {
+				validNFs = append(validNFs, nf)
+				found = true
+				break
+			}
+		}
+		if !found {
+			invalidNFs = append(invalidNFs, nfFilter)
+		}
+	}
+
+	// Report invalid NFs
+	if len(invalidNFs) > 0 {
+		fmt.Printf("❌ Invalid NFs specified: %v\n", invalidNFs)
+		fmt.Println("📋 Available NFs:")
+		for nf := range nfServices {
+			fmt.Printf("   - %s\n", nf)
+		}
+		return fmt.Errorf("invalid NFs specified: %v", invalidNFs)
+	}
+
+	// Build configuration for valid NFs
+	fmt.Printf("✅ Valid NFs found: %v\n", validNFs)
+
+	// Filter services for specified NFs
+	filteredServices := make(map[string]types.ServiceMetadata)
+	for _, nf := range validNFs {
+		for _, service := range nfServices[nf] {
+			filteredServices[service.Name] = service
+		}
+	}
+
+	// Generate configuration with filtered services
+	nfServices = GroupServicesByNF(filteredServices)
+	config := types.ConfigurationFile{
+		UserInputs: buildUserInputSection(nfServices),
+	}
+
+	// Write configuration file
+	if err := writeConfigurationFile(config, "configuration.yaml"); err != nil {
+		return err
+	}
+
+	// Build and write API list (추가된 부분)
+	apiList := buildAPIList(nfServices)
+	return writeAPIListFile(apiList)
+}
+
+// buildConfigurationForAllNFs builds configuration for all available NFs
+func buildConfigurationForAllNFs(services map[string]types.ServiceMetadata) error {
+	nfServices := GroupServicesByNF(services)
 
 	// Build and write configuration
 	config := types.ConfigurationFile{
 		UserInputs: buildUserInputSection(nfServices),
 	}
 
-	if err := writeConfigurationFile(config, nfFilter); err != nil {
+	if err := writeConfigurationFile(config, "configuration.yaml"); err != nil {
 		return err
 	}
 
 	// Build and write API list
 	apiList := buildAPIList(nfServices)
 	return writeAPIListFile(apiList)
-}
-
-// groupServicesByNF groups services by NF type
-func groupServicesByNF(services map[string]types.ServiceMetadata, nfFilter string) map[string][]types.ServiceMetadata {
-	nfServices := GroupServicesByNF(services)
-
-	if nfFilter != "" {
-		filteredNFs := make(map[string][]types.ServiceMetadata)
-		for nf, serviceList := range nfServices {
-			if strings.EqualFold(nf, nfFilter) {
-				filteredNFs[nf] = serviceList
-			}
-		}
-		return filteredNFs
-	}
-
-	return nfServices
 }
 
 // buildAPIList creates API list with tree structure
@@ -193,21 +246,9 @@ func buildCommonParametersSection(nfServices map[string][]types.ServiceMetadata)
 		},
 	}
 
-	// Group parameters by category
-	categories := groupParametersByCategory(commonParams)
-
-	categoryIndex := 1
-	for category, params := range categories {
-		categoryKey := fmt.Sprintf("# Category_%d_%s", categoryIndex, strings.ReplaceAll(category, " ", "_"))
-		result[categoryKey] = map[string]interface{}{
-			"description": category,
-		}
-
-		for paramName, paramInfo := range params {
-			result[paramName] = formatParameterForUser(paramInfo)
-		}
-
-		categoryIndex++
+	// 카테고리 없이 바로 파라미터들 추가
+	for paramName, paramInfo := range commonParams {
+		result[paramName] = formatParameterForUser(paramInfo)
 	}
 
 	return result
@@ -886,8 +927,7 @@ func writeAPIListFile(apiList types.APIList) error {
 	return nil
 }
 
-func writeConfigurationFile(config types.ConfigurationFile, nfFilter string) error {
-	filename := "configuration.yaml"
+func writeConfigurationFile(config types.ConfigurationFile, filename string) error {
 	file, err := os.Create(filename)
 	if err != nil {
 		return fmt.Errorf("failed to create configuration file: %w", err)
@@ -959,12 +999,6 @@ user_inputs:
 	writeYAMLSection(file, config.UserInputs.APISpecificRequestBodies, 4)
 
 	fmt.Printf("✅ Configuration file created: %s\n", filename)
-	if nfFilter != "" {
-		fmt.Printf("📋 Generated configuration for NF: %s\n", nfFilter)
-	} else {
-		fmt.Printf("📋 Generated configuration for all NFs\n")
-	}
-
 	return nil
 }
 

@@ -10,12 +10,13 @@ import (
 // PrintUsage prints usage information
 func PrintUsage() {
 	fmt.Println("💡 Usage:")
-	fmt.Println("    ctrlbench -t NF_NAME -a \"API_NAME\" [OPTIONS]")
+	fmt.Println("    ctrlbench -t NF_NAME -a API_NAME  [OPTIONS]")
 	fmt.Println("    ctrlbench -h              # Show usage only")
 	fmt.Println("    ctrlbench -h all          # Show all NFs and APIs")
 	fmt.Println("    ctrlbench -h NF_NAME      # Show specific NF APIs")
 	fmt.Println("    ctrlbench -b              # Build configuration file for all NFs")
 	fmt.Println("    ctrlbench -b NF_NAME      # Build configuration file for specific NF")
+	fmt.Println("    ctrlbench -b \"NF1 NF2\"    # Build configuration file for multiple NFs")
 	fmt.Println()
 
 	fmt.Println("📊 Benchmark Options:")
@@ -26,16 +27,23 @@ func PrintUsage() {
 	fmt.Println()
 
 	fmt.Println("📋 Sequential Benchmark Examples:")
-	fmt.Println("    ctrlbench -t AUSF -a \"PostUeAuthentications\" -i 10")
-	fmt.Println("    ctrlbench -t AUSF -a \"PostUeAuthentications\" -d 30")
-	fmt.Println("    ctrlbench -t AUSF -a \"PostUeAuthentications\" -d 30 -r 5")
-	fmt.Println("    ctrlbench -t UDM -a \"GetSubscriptionData\" -i 5 -r 2")
+	fmt.Println("    ctrlbench -t AUSF -a PostUeAuthentications -i 10")
+	fmt.Println("    ctrlbench -t AUSF -a PostUeAuthentications -d 30")
+	fmt.Println("    ctrlbench -t AUSF -a PostUeAuthentications -d 30 -r 5")
+	fmt.Println("    ctrlbench -t UDM -a GetSubscriptionData -i 5 -r 2")
 	fmt.Println()
 
 	fmt.Println("🚀 Concurrent Load Testing Examples:")
-	fmt.Println("    ctrlbench -t AUSF -a \"PostUeAuthentications\" -c 10 -d 30")
-	fmt.Println("    ctrlbench -t AUSF -a \"PostUeAuthentications\" -c 5 -d 60 -r 10")
-	fmt.Println("    ctrlbench -t UDM -a \"GetSubscriptionData\" -c 20 -d 120")
+	fmt.Println("    ctrlbench -t AUSF -a PostUeAuthentications -c 10 -d 30")
+	fmt.Println("    ctrlbench -t AUSF -a PostUeAuthentications -c 5 -d 60 -r 10")
+	fmt.Println("    ctrlbench -t UDM -a GetSubscriptionData -c 20 -d 120")
+	fmt.Println()
+
+	fmt.Println("🔧 Configuration Build Examples:")
+	fmt.Println("    ctrlbench -b              # Build for all NFs")
+	fmt.Println("    ctrlbench -b AUSF         # Build for AUSF only")
+	fmt.Println("    ctrlbench -b \"AUSF NRF\"   # Build for AUSF and NRF")
+	fmt.Println("    ctrlbench -b \"ausf udm amf\"  # Build for multiple NFs (case insensitive)")
 	fmt.Println()
 
 	fmt.Println("📝 Notes:")
@@ -44,6 +52,7 @@ func PrintUsage() {
 	fmt.Println("    • Use -c option for concurrent load testing")
 	fmt.Println("    • Use -d for time-based execution, -i for iteration-based")
 	fmt.Println("    • Rate limiting (-r) works with both sequential and concurrent modes")
+	fmt.Println("    • NF names are case insensitive for -b option")
 }
 
 // ShowHelp displays help information for services and APIs

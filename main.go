@@ -73,12 +73,14 @@ func handleHelpCommand(services map[string]types.ServiceMetadata) {
 
 // handleBuildCommand processes build configuration flag
 func handleBuildCommand(services map[string]types.ServiceMetadata) {
-	nfFilter := ""
+	var nfFilters []string
+
 	if flag.NArg() > 0 {
-		nfFilter = flag.Arg(0)
+		nfInput := flag.Arg(0)
+		nfFilters = strings.Fields(strings.ToUpper(nfInput))
 	}
 
-	err := cli.BuildConfiguration(services, nfFilter)
+	err := cli.BuildConfiguration(services, nfFilters)
 	if err != nil {
 		log.Printf("  Failed to build configuration: %v", err)
 		os.Exit(1)
