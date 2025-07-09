@@ -155,14 +155,22 @@ func (e *APIExecutor) RunBenchmark(execInfo *types.APIExecutionInfo, iterations 
 	}
 
 	var result types.BenchmarkResult
+	var allDurations []time.Duration // 모든 응답 시간 저장용
 	var totalTime time.Duration
 	var minTime, maxTime time.Duration
+	var requestCount int
+	var successCount, failureCount int
+	errorDistribution := make(map[string]int) // 에러 분포 추가
 
-	requestCount := 0
 	startTime := time.Now()
 
 	for {
-		// 종료 조건 체크
+		// Rate limiting
+		if rateLimiter != nil {
+			<-rateLimiter
+		}
+
+		// Check termination conditions
 		if duration > 0 {
 			if time.Now().After(endTime) {
 				break
@@ -173,45 +181,57 @@ func (e *APIExecutor) RunBenchmark(execInfo *types.APIExecutionInfo, iterations 
 			}
 		}
 
-		// Rate limiting
-		if rateLimiter != nil {
-			<-rateLimiter
-		}
-
 		requestCount++
 
-		// HTTP 요청 실행
-		duration, err := e.ExecuteHTTPCall(execInfo)
+		// Execute request
+		execDuration, err := e.ExecuteHTTPCall(execInfo)
+		allDurations = append(allDurations, execDuration) // 모든 응답 시간 저장
+		totalTime += execDuration
 
+		// Track min/max times
+		if requestCount == 1 || execDuration < minTime {
+			minTime = execDuration
+		}
+		if requestCount == 1 || execDuration > maxTime {
+			maxTime = execDuration
+		}
+
+		// Track success/failure and errors
 		if err != nil {
-			result.FailureCount++
+			failureCount++
+			errorType := fmt.Sprintf("Error: %v", err)
+			errorDistribution[errorType]++
 			fmt.Printf("❌ Request %d failed: %v\n", requestCount, err)
 		} else {
-			result.SuccessCount++
-			totalTime += duration
-			fmt.Printf("✅ Request %d completed in %v\n", requestCount, duration)
-
-			// Track min/max times
-			if result.SuccessCount == 1 || duration < minTime {
-				minTime = duration
-			}
-			if result.SuccessCount == 1 || duration > maxTime {
-				maxTime = duration
-			}
+			successCount++
+			fmt.Printf("✅ Request %d completed in %v\n", requestCount, execDuration)
 		}
 	}
 
 	actualDuration := time.Since(startTime)
-	result.TotalRequests = requestCount
-	result.TotalTime = actualDuration
-	result.MinTime = minTime
-	result.MaxTime = maxTime
+	requestsPerSecond := float64(requestCount) / actualDuration.Seconds()
 
-	if result.SuccessCount > 0 {
-		result.AvgTime = totalTime / time.Duration(result.SuccessCount)
+	var avgTime time.Duration
+	if requestCount > 0 {
+		avgTime = totalTime / time.Duration(requestCount)
 	}
 
-	result.RequestsPerSecond = float64(result.TotalRequests) / actualDuration.Seconds()
+	// Calculate trimmed means for sequential benchmark
+	trimmedMeans := calculateTrimmedMeans(allDurations)
+
+	result = types.BenchmarkResult{
+		TotalRequests:     requestCount,
+		SuccessCount:      successCount,
+		FailureCount:      failureCount,
+		TotalTime:         actualDuration,
+		AvgTime:           avgTime,
+		MinTime:           minTime,
+		MaxTime:           maxTime,
+		RequestsPerSecond: requestsPerSecond,
+		Percentiles:       nil,               // Sequential doesn't calculate percentiles
+		TrimmedMeans:      trimmedMeans,      // 절사 평균 추가
+		ErrorDistribution: errorDistribution, // 에러 분포 추가
+	}
 
 	return &result, nil
 }
@@ -274,7 +294,12 @@ func (e *APIExecutor) RunConcurrentBenchmark(execInfo *types.APIExecutionInfo, c
 				if time.Now().After(endTime) {
 					break
 				}
-				fmt.Printf("%+v\n", result)
+
+				if result.Error != nil {
+					fmt.Printf("❌ Worker %d: %v\n", result.WorkerID, result.Error)
+				} else {
+					fmt.Printf("✅ Worker %d: %d (%v)\n", result.WorkerID, result.StatusCode, result.Duration)
+				}
 			}
 		}(i)
 	}
@@ -322,10 +347,6 @@ func (e *APIExecutor) executeRequestWithClient(execInfo *types.APIExecutionInfo,
 			Timestamp:    start,
 			ResponseBody: "",
 		}
-	}
-
-	for key, value := range execInfo.Headers {
-		req.Header.Set(key, value)
 	}
 
 	httpStart := time.Now()
@@ -408,6 +429,7 @@ func (e *APIExecutor) collectConcurrentResults(results <-chan *RequestResult, st
 	avgTime := totalTime / time.Duration(totalRequests)
 
 	percentiles := calculatePercentiles(allDurations)
+	trimmedMeans := calculateTrimmedMeans(allDurations)
 
 	return &types.BenchmarkResult{
 		TotalRequests:     totalRequests,
@@ -419,6 +441,7 @@ func (e *APIExecutor) collectConcurrentResults(results <-chan *RequestResult, st
 		MaxTime:           maxTime,
 		RequestsPerSecond: requestsPerSecond,
 		Percentiles:       percentiles,
+		TrimmedMeans:      trimmedMeans, // 추가
 		ErrorDistribution: errorDistribution,
 	}, nil
 }
@@ -440,4 +463,83 @@ func calculatePercentiles(durations []time.Duration) map[string]time.Duration {
 		"95th": durations[len(durations)*95/100],
 		"99th": durations[len(durations)*99/100],
 	}
+}
+
+// calculateTrimmedMeans calculates trimmed means by removing outliers
+func calculateTrimmedMeans(durations []time.Duration) map[string]time.Duration {
+	if len(durations) == 0 {
+		return nil
+	}
+
+	trimmedMeans := make(map[string]time.Duration)
+
+	// Sort durations for trimmed mean calculation
+	sort.Slice(durations, func(i, j int) bool {
+		return durations[i] < durations[j]
+	})
+
+	// Calculate trimmed means
+	trimmedMeans["90%"] = calculateTrimmedMean(durations, 0.90)
+	trimmedMeans["95%"] = calculateTrimmedMean(durations, 0.95)
+	trimmedMeans["99%"] = calculateTrimmedMean(durations, 0.99)
+
+	return trimmedMeans
+}
+
+// calculateTrimmedMean 함수에 디버그 추가
+func calculateTrimmedMean(sortedDurations []time.Duration, percentage float64) time.Duration {
+	n := len(sortedDurations)
+	if n == 0 {
+		return 0
+	}
+
+	// Calculate how many values to trim from each end
+	trimCount := int(float64(n) * (1.0 - percentage) / 2.0)
+
+	// Debug output
+	fmt.Printf("🔍 DEBUG %.0f%% Trimmed: n=%d, trimCount=%d, ", percentage*100, n, trimCount)
+
+	// Ensure we don't trim everything
+	if trimCount >= n/2 {
+		trimCount = n / 4
+		fmt.Printf("adjusted trimCount=%d, ", trimCount)
+	}
+
+	start := trimCount
+	end := n - trimCount
+
+	fmt.Printf("using range [%d:%d]\n", start, end)
+
+	if start >= end {
+		return calculateAverage(sortedDurations)
+	}
+
+	var sum time.Duration
+	count := 0
+	for i := start; i < end; i++ {
+		sum += sortedDurations[i]
+		count++
+	}
+
+	if count == 0 {
+		return calculateAverage(sortedDurations)
+	}
+
+	result := sum / time.Duration(count)
+	fmt.Printf("   Result: %v (from %d values)\n", result, count)
+	return result
+}
+
+// calculateAverage calculates simple average of durations
+func calculateAverage(durations []time.Duration) time.Duration {
+	if len(durations) == 0 {
+		return 0
+	}
+
+	var sum time.Duration
+	for _, d := range durations {
+		sum += d
+	}
+
+	return sum / time.Duration(len(durations))
 }

@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -77,25 +78,70 @@ func ExtractVersionFromPath(servicePath string) string {
 	return "v1"
 }
 
-// API 이름 관련 유틸리티 함수들
 func ExtractMethodFromAPI(apiName string) string {
+	// Check for method prefixes in API name
+	apiUpper := strings.ToUpper(apiName)
+
+	if strings.HasPrefix(apiUpper, "POST") {
+		return "POST"
+	} else if strings.HasPrefix(apiUpper, "GET") {
+		return "GET"
+	} else if strings.HasPrefix(apiUpper, "PUT") {
+		return "PUT"
+	} else if strings.HasPrefix(apiUpper, "DELETE") {
+		return "DELETE"
+	} else if strings.HasPrefix(apiUpper, "PATCH") {
+		return "PATCH"
+	}
+
+	// Check for bracketed method format like [POST]
 	methods := []string{"POST", "GET", "PUT", "DELETE", "PATCH"}
 	for _, method := range methods {
 		if strings.Contains(apiName, "["+method+"]") {
 			return method
 		}
 	}
-	return "GET"
+
+	return "GET" // default
 }
 
-func CleanAPIName(apiName string) string {
-	methods := []string{"[POST]", "[GET]", "[PUT]", "[DELETE]", "[PATCH]", "[HEAD]", "[OPTIONS]"}
-	for _, method := range methods {
-		if strings.HasSuffix(apiName, " "+method) {
-			return strings.TrimSuffix(apiName, " "+method)
+func matchesAPI(operation *types.Operation, api types.APIMetadata) bool {
+	return matchesOperation(operation, api.Name)
+}
+
+// GenerateUniqueAPIName generates unique API name from path and method
+func GenerateUniqueAPIName(path, method, operationId string) string {
+	// If operationId exists, use it
+	if operationId != "" {
+		return operationId
+	}
+
+	// Generate from method + path
+	// Remove leading slash and replace path parameters
+	cleanPath := strings.TrimPrefix(path, "/")
+
+	// Replace path parameters {param} with capitalized name
+	re := regexp.MustCompile(`\{([^}]+)\}`)
+	cleanPath = re.ReplaceAllStringFunc(cleanPath, func(match string) string {
+		param := strings.Trim(match, "{}")
+		return strings.Title(param)
+	})
+
+	// Replace slashes and hyphens with nothing, capitalize words
+	parts := strings.FieldsFunc(cleanPath, func(c rune) bool {
+		return c == '/' || c == '-'
+	})
+
+	var result strings.Builder
+	result.WriteString(strings.Title(strings.ToLower(method)))
+
+	for _, part := range parts {
+		if part != "" {
+			result.WriteString(strings.Title(part))
 		}
 	}
-	return apiName
+
+	return result.String()
 }
 
 func CleanServiceName(serviceName string) string {
@@ -216,4 +262,55 @@ func TrimSlashLeft(s string) string {
 // NormalizeURL ensures URL has proper format (no trailing slash)
 func NormalizeURL(url string) string {
 	return TrimSlashRight(url)
+}
+
+// getMethodFromOpenAPISpec - Extract HTTP method from OpenAPI spec for specific API
+func GetMethodFromOpenAPISpec(api types.APIMetadata, service types.ServiceMetadata, apiName string) string {
+	if service.OpenAPISpec == nil {
+		return ExtractMethodFromAPI(apiName)
+	}
+
+	// Find the operation in OpenAPI spec that matches this API
+	for path, pathItem := range service.OpenAPISpec.Paths {
+		if path != api.Path {
+			continue
+		}
+
+		// Check each HTTP method in the path
+		if pathItem.Get != nil && matchesOperation(pathItem.Get, apiName) {
+			return "GET"
+		}
+		if pathItem.Post != nil && matchesOperation(pathItem.Post, apiName) {
+			return "POST"
+		}
+		if pathItem.Put != nil && matchesOperation(pathItem.Put, apiName) {
+			return "PUT"
+		}
+		if pathItem.Delete != nil && matchesOperation(pathItem.Delete, apiName) {
+			return "DELETE"
+		}
+		if pathItem.Patch != nil && matchesOperation(pathItem.Patch, apiName) {
+			return "PATCH"
+		}
+	}
+
+	// Fallback to extracting from API name
+	return ExtractMethodFromAPI(apiName)
+}
+
+// matchesOperation - Check if operation matches the API name
+func matchesOperation(operation *types.Operation, apiName string) bool {
+	// Direct operationId match
+	if operation.OperationID == apiName {
+		return true
+	}
+
+	// Remove method suffix and try again
+	cleanName := strings.TrimSuffix(apiName, " [GET]")
+	cleanName = strings.TrimSuffix(cleanName, " [POST]")
+	cleanName = strings.TrimSuffix(cleanName, " [PUT]")
+	cleanName = strings.TrimSuffix(cleanName, " [DELETE]")
+	cleanName = strings.TrimSuffix(cleanName, " [PATCH]")
+
+	return operation.OperationID == cleanName
 }

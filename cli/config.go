@@ -119,18 +119,14 @@ func buildAPIList(nfServices map[string][]types.ServiceMetadata) types.APIList {
 			serviceAPIs := make(map[string]types.APIListEntry)
 
 			for apiName, api := range service.APIs {
-				// Use actual method from API metadata instead of extracting from name
-				method := "GET" // default
-				if len(api.Methods) > 0 {
-					method = api.Methods[0]
-				}
-				cleanName := CleanAPIName(apiName)
+				// Extract method from OpenAPI spec or fallback to API name
+				method := GetMethodFromOpenAPISpec(api, service, apiName)
 
 				parameterInfos := buildParameterInfos(api, service)
 
 				requestBodyInfo := buildRequestBodyInfo(api)
 
-				serviceAPIs[cleanName] = types.APIListEntry{
+				serviceAPIs[apiName] = types.APIListEntry{
 					Path:              api.Path,
 					Method:            method,
 					Parameters:        parameterInfos,
@@ -163,6 +159,7 @@ func buildUserInputSection(nfServices map[string][]types.ServiceMetadata) types.
 		CommonRequestBodies:      buildCommonRequestBodiesSection(nfServices),
 		APISpecificParameters:    buildAPISpecificParametersSection(nfServices),
 		APISpecificRequestBodies: buildAPISpecificRequestBodiesSection(nfServices),
+		APIChainConfiguration:    buildAPIChainConfigurationSection(),
 	}
 
 	return userInputs
@@ -396,53 +393,12 @@ func extractParameterInfos(operation *types.Operation) []types.ParamMeta {
 	return paramInfos
 }
 
-// matchesAPI - Operation이 API와 일치하는지 확인
-func matchesAPI(operation *types.Operation, api types.APIMetadata) bool {
-	// API 이름에서 메서드 부분 제거하고 비교
-	cleanAPIName := CleanAPIName(api.Name)
-	return operation.OperationID == cleanAPIName
-}
-
 // inferParameterLocation - Infer parameter location (path or query)
 func inferParameterLocation(paramName, path string) string {
 	if IsPathParameter(paramName, path) {
 		return "path"
 	}
 	return "query"
-}
-
-// groupParametersByCategory - Group parameters by category
-func groupParametersByCategory(params map[string]interface{}) map[string]map[string]interface{} {
-	categories := map[string]map[string]interface{}{
-		"User Identifiers":       make(map[string]interface{}),
-		"Authentication Related": make(map[string]interface{}),
-		"Session Related":        make(map[string]interface{}),
-		"Others":                 make(map[string]interface{}),
-	}
-
-	for paramName, paramInfo := range params {
-		paramLower := strings.ToLower(paramName)
-
-		switch {
-		case strings.Contains(paramLower, "ue") || strings.Contains(paramLower, "supi") || strings.Contains(paramLower, "gpsi"):
-			categories["User Identifiers"][paramName] = paramInfo
-		case strings.Contains(paramLower, "auth"):
-			categories["Authentication Related"][paramName] = paramInfo
-		case strings.Contains(paramLower, "session"):
-			categories["Session Related"][paramName] = paramInfo
-		default:
-			categories["Others"][paramName] = paramInfo
-		}
-	}
-
-	// Remove empty categories
-	for category, params := range categories {
-		if len(params) == 0 {
-			delete(categories, category)
-		}
-	}
-
-	return categories
 }
 
 // formatParameterForUser - Format parameter in user-friendly way
@@ -876,6 +832,42 @@ func calculateBodyFrequency(bodyName string) int {
 	return 1 // Low frequency
 }
 
+// buildAPIChainConfigurationSection - Build API chaining configuration section
+func buildAPIChainConfigurationSection() map[string]interface{} {
+	result := map[string]interface{}{
+		"enabled": map[string]interface{}{
+			"value":       false,
+			"description": "Enable API chaining functionality",
+			"type":        "boolean",
+		},
+		"chains": buildSimpleAPIChains(),
+	}
+
+	return result
+}
+
+// buildSimpleAPIChains - Build simplified API chains
+func buildSimpleAPIChains() map[string]interface{} {
+	chains := make(map[string]interface{})
+
+	// Add example
+	chains["PutUeAuthentications5gAkaConfirmation"] = map[string]interface{}{
+		"prerequisite_api": map[string]interface{}{
+			"NF":          "AUSF",
+			"value":       "PostUeAuthentications",
+			"description": "API to execute before this API (format: NF_SERVICE_API)",
+			"example":     "AUSF_nausf-auth_another_api",
+		},
+		"chain_type": map[string]interface{}{
+			"value":       "once_before_benchmark",
+			"description": "When to execute prerequisite API",
+			"options":     []string{"once_before_benchmark", "before_each_call"},
+		},
+	}
+
+	return chains
+}
+
 // File writing functions
 func writeAPIListFile(apiList types.APIList) error {
 	openapiDir := "./openapi"
@@ -945,11 +937,13 @@ func writeConfigurationFile(config types.ConfigurationFile, filename string) err
 # 2. Adjust individual NF settings in nf_settings  
 # 3. Enter common parameter values in common_parameters
 # 4. Fill in request body field values in common_request_bodies
+# 5. Configure API chains in api_chain_configuration for prerequisite API calls
 #
 # Important Notes:
 # - Only enter actual values in the 'value' fields
 # - Fields with required=true must have values
 # - 'example' fields are for reference only, do not modify them
+# - API chains allow executing prerequisite APIs before main benchmark APIs
 # =============================================================================
 
 user_inputs:
@@ -997,6 +991,24 @@ user_inputs:
 	file.WriteString("# =============================================================================\n")
 	file.WriteString("  api_specific_request_bodies:\n")
 	writeYAMLSection(file, config.UserInputs.APISpecificRequestBodies, 4)
+
+	// Write API chain configuration separator and section
+	file.WriteString("\n# =============================================================================\n")
+	file.WriteString("# API CHAIN CONFIGURATION - Simple API Chain Setup\n")
+	file.WriteString("# =============================================================================\n")
+	file.WriteString("# Configure prerequisite APIs for benchmark execution\n")
+	file.WriteString("# \n")
+	file.WriteString("# Format:\n")
+	file.WriteString("#   benchmark_api_name:\n")
+	file.WriteString("#     prerequisite_api: API_TO_RUN_FIRST\n")
+	file.WriteString("#     chain_type: once_before_benchmark | before_each_call\n")
+	file.WriteString("# \n")
+	file.WriteString("# Chain Types:\n")
+	file.WriteString("#   - once_before_benchmark: Run prerequisite API once, use response for all benchmark calls\n")
+	file.WriteString("#   - before_each_call:      Run prerequisite API before each benchmark call\n")
+	file.WriteString("# =============================================================================\n")
+	file.WriteString("  api_chain_configuration:\n")
+	writeYAMLSection(file, config.UserInputs.APIChainConfiguration, 4)
 
 	fmt.Printf("✅ Configuration file created: %s\n", filename)
 	return nil

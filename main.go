@@ -174,6 +174,11 @@ func printResults(result *types.BenchmarkResult) {
 	fmt.Printf("Average: %v\n", result.AvgTime)
 	fmt.Printf("Minimum: %v\n", result.MinTime)
 	fmt.Printf("Maximum: %v\n", result.MaxTime)
+	if result.TrimmedMeans != nil {
+		fmt.Printf("90%% Trimmed Average: %v\n", result.TrimmedMeans["90%"])
+		fmt.Printf("95%% Trimmed Average: %v\n", result.TrimmedMeans["95%"])
+		fmt.Printf("99%% Trimmed Average: %v\n", result.TrimmedMeans["99%"])
+	}
 
 	// Add error distribution for sequential benchmark too
 	if len(result.ErrorDistribution) > 0 {
@@ -200,6 +205,11 @@ func printConcurrentResults(result *types.BenchmarkResult) {
 	fmt.Printf("Average: %v\n", result.AvgTime)
 	fmt.Printf("Minimum: %v\n", result.MinTime)
 	fmt.Printf("Maximum: %v\n", result.MaxTime)
+	if result.TrimmedMeans != nil {
+		fmt.Printf("90%% Trimmed Average: %v\n", result.TrimmedMeans["90%"])
+		fmt.Printf("95%% Trimmed Average: %v\n", result.TrimmedMeans["95%"])
+		fmt.Printf("99%% Trimmed Average: %v\n", result.TrimmedMeans["99%"])
+	}
 
 	if result.Percentiles != nil {
 		fmt.Printf("\nPercentiles:\n")

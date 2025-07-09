@@ -12,6 +12,7 @@ type UserInputSection struct {
 	CommonRequestBodies      map[string]interface{}            `yaml:"common_request_bodies"`
 	APISpecificParameters    map[string]interface{}            `yaml:"api_specific_parameters"`
 	APISpecificRequestBodies map[string]interface{}            `yaml:"api_specific_request_bodies"`
+	APIChainConfiguration    map[string]interface{}            `yaml:"api_chain_configuration"`
 }
 
 type CommonConfig struct {

@@ -111,10 +111,9 @@ func showSpecificNF(services map[string]types.ServiceMetadata, nfFilter string) 
 		apiNames := GetSortedKeys(service.APIs)
 		for _, apiName := range apiNames {
 			api := service.APIs[apiName]
-			method := ExtractMethodFromAPI(apiName)
-			cleanName := CleanAPIName(apiName)
+			method := GetMethodFromOpenAPISpec(api, service, apiName)
 
-			fmt.Printf("    📄 %s\n", cleanName)
+			fmt.Printf("    📄 %s\n", apiName)
 			fmt.Printf("        Method: %s\n", method)
 			fmt.Printf("        Path: %s\n", api.Path)
 

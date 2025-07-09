@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"time"
 
 	"github.com/devuk0204/ctrlbench/types"
+	"golang.org/x/net/http2"
 )
 
 // HTTPClient wraps http.Client with additional functionality
@@ -25,14 +27,19 @@ type HTTPResult struct {
 	Error        error
 }
 
-// NewHTTPClient creates a new HTTP client with proper configuration
+// NewHTTPClient creates a new HTTP/2-only client
 func NewHTTPClient() *HTTPClient {
+	tr := &http2.Transport{
+		AllowHTTP: true, // HTTP/2 Cleartext (h2c) 허용
+		DialTLS: func(network, addr string, cfg *tls.Config) (net.Conn, error) {
+			// TLS 없이 일반 TCP 연결 사용
+			return net.Dial(network, addr)
+		},
+	}
 	return &HTTPClient{
 		client: &http.Client{
-			Timeout: 30 * time.Second,
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-			},
+			Timeout:   30 * time.Second,
+			Transport: tr,
 		},
 	}
 }

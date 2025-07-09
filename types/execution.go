@@ -13,6 +13,7 @@ type BenchmarkResult struct {
 	MaxTime           time.Duration            `json:"max_time"`
 	RequestsPerSecond float64                  `json:"requests_per_second"`
 	Percentiles       map[string]time.Duration `json:"percentiles,omitempty"`
+	TrimmedMeans      map[string]time.Duration `json:"trimmed_means,omitempty"` // 추가
 	ErrorDistribution map[string]int           `json:"error_distribution,omitempty"`
 }
 
