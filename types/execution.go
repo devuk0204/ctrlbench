@@ -55,3 +55,29 @@ type HTTPResult struct {
 	ResponseBody string
 	Error        error
 }
+
+// APIChainConfig represents API chain configuration
+type APIChainConfig struct {
+	Enabled         bool                `yaml:"enabled"`
+	PrerequisiteAPI string              `yaml:"prerequisite_api"` // Format: NF_API
+	ChainType       string              `yaml:"chain_type"`       // "once_before_benchmark" or "before_each_call"
+	ResponseMapping *APIResponseMapping `yaml:"response_mapping,omitempty"`
+	MainNF          string              `yaml:"main_nf,omitempty"`         // Main API's NF
+	PrerequisiteNF  string              `yaml:"prerequisite_nf,omitempty"` // Prerequisite API's NF
+}
+
+// APIResponseMapping defines how to map prerequisite API response to main API
+type APIResponseMapping struct {
+	Parameters  map[string]string `yaml:"parameters"`   // "paramName": "$.response.field"
+	Headers     map[string]string `yaml:"headers"`      // "headerName": "$.response.field"
+	RequestBody map[string]string `yaml:"request_body"` // "bodyField": "$.response.field"
+}
+
+// ChainExecutionResult stores prerequisite API execution result
+type ChainExecutionResult struct {
+	ResponseBody  string
+	StatusCode    int
+	Duration      time.Duration
+	Error         error
+	ExtractedData map[string]interface{} // Extracted values from response
+}

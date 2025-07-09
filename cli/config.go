@@ -850,18 +850,69 @@ func buildAPIChainConfigurationSection() map[string]interface{} {
 func buildSimpleAPIChains() map[string]interface{} {
 	chains := make(map[string]interface{})
 
-	// Add example
+	// Add example for same NF chain
 	chains["PutUeAuthentications5gAkaConfirmation"] = map[string]interface{}{
+		"NF": "AUSF",
 		"prerequisite_api": map[string]interface{}{
 			"NF":          "AUSF",
 			"value":       "PostUeAuthentications",
-			"description": "API to execute before this API (format: NF_SERVICE_API)",
-			"example":     "AUSF_nausf-auth_another_api",
+			"description": "API to execute before this API",
+			"example":     "PostUeAuthentications",
 		},
 		"chain_type": map[string]interface{}{
 			"value":       "once_before_benchmark",
 			"description": "When to execute prerequisite API",
 			"options":     []string{"once_before_benchmark", "before_each_call"},
+		},
+		"response_mapping": map[string]interface{}{
+			"description": "Map prerequisite API response to main API parameters",
+			"parameters": map[string]interface{}{
+				"authCtxId": map[string]interface{}{
+					"value":       "$.authCtxId",
+					"description": "Extract authCtxId from prerequisite API response",
+					"example":     "$.response.authCtxId",
+				},
+			},
+			"headers": map[string]interface{}{
+				"X-Auth-Token": map[string]interface{}{
+					"value":       "",
+					"description": "Extract token from prerequisite API response",
+					"example":     "$.token",
+				},
+			},
+			"request_body": map[string]interface{}{
+				"resStar": map[string]interface{}{
+					"value":       "$.resStar",
+					"description": "Extract resStar from prerequisite API response",
+					"example":     "$.response.resStar",
+				},
+			},
+		},
+	}
+
+	// Add example for cross-NF chain
+	chains["ExampleCrossNFAPI"] = map[string]interface{}{
+		"NF": "SMF",
+		"prerequisite_api": map[string]interface{}{
+			"NF":          "UDM",
+			"value":       "SomeUDMAPI",
+			"description": "UDM API to execute before SMF API",
+			"example":     "GetSubscriberData",
+		},
+		"chain_type": map[string]interface{}{
+			"value":       "once_before_benchmark",
+			"description": "When to execute prerequisite API",
+			"options":     []string{"once_before_benchmark", "before_each_call"},
+		},
+		"response_mapping": map[string]interface{}{
+			"description": "Map UDM API response to SMF API parameters",
+			"parameters": map[string]interface{}{
+				"supi": map[string]interface{}{
+					"value":       "$.subscriberInfo.supi",
+					"description": "Extract SUPI from UDM response",
+					"example":     "$.response.supi",
+				},
+			},
 		},
 	}
 

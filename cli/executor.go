@@ -131,8 +131,10 @@ func (e *APIExecutor) ExecuteHTTPCall(execInfo *types.APIExecutionInfo) (time.Du
 
 }
 
-// RunBenchmark runs benchmark for specified iterations or duration
+// RunBenchmark with API chain support and response mapping
 func (e *APIExecutor) RunBenchmark(execInfo *types.APIExecutionInfo, iterations int, duration time.Duration, rateLimit int) (*types.BenchmarkResult, error) {
+	// API Chain logic REMOVED - already handled in PrepareAPIExecution
+
 	fmt.Printf("🚀 Starting sequential benchmark:\n")
 	if duration > 0 {
 		fmt.Printf("   Duration: %v\n", duration)
@@ -155,14 +157,15 @@ func (e *APIExecutor) RunBenchmark(execInfo *types.APIExecutionInfo, iterations 
 	}
 
 	var result types.BenchmarkResult
-	var allDurations []time.Duration // 모든 응답 시간 저장용
+	var allDurations []time.Duration
 	var totalTime time.Duration
 	var minTime, maxTime time.Duration
 	var requestCount int
 	var successCount, failureCount int
-	errorDistribution := make(map[string]int) // 에러 분포 추가
+	errorDistribution := make(map[string]int)
 
-	startTime := time.Now()
+	// Benchmark start time
+	benchmarkStartTime := time.Now()
 
 	for {
 		// Rate limiting
@@ -183,9 +186,9 @@ func (e *APIExecutor) RunBenchmark(execInfo *types.APIExecutionInfo, iterations 
 
 		requestCount++
 
-		// Execute request
+		// Execute main API (prerequisite already handled in PrepareAPIExecution)
 		execDuration, err := e.ExecuteHTTPCall(execInfo)
-		allDurations = append(allDurations, execDuration) // 모든 응답 시간 저장
+		allDurations = append(allDurations, execDuration)
 		totalTime += execDuration
 
 		// Track min/max times
@@ -208,7 +211,7 @@ func (e *APIExecutor) RunBenchmark(execInfo *types.APIExecutionInfo, iterations 
 		}
 	}
 
-	actualDuration := time.Since(startTime)
+	actualDuration := time.Since(benchmarkStartTime)
 	requestsPerSecond := float64(requestCount) / actualDuration.Seconds()
 
 	var avgTime time.Duration
@@ -216,7 +219,6 @@ func (e *APIExecutor) RunBenchmark(execInfo *types.APIExecutionInfo, iterations 
 		avgTime = totalTime / time.Duration(requestCount)
 	}
 
-	// Calculate trimmed means for sequential benchmark
 	trimmedMeans := calculateTrimmedMeans(allDurations)
 
 	result = types.BenchmarkResult{
@@ -228,16 +230,18 @@ func (e *APIExecutor) RunBenchmark(execInfo *types.APIExecutionInfo, iterations 
 		MinTime:           minTime,
 		MaxTime:           maxTime,
 		RequestsPerSecond: requestsPerSecond,
-		Percentiles:       nil,               // Sequential doesn't calculate percentiles
-		TrimmedMeans:      trimmedMeans,      // 절사 평균 추가
-		ErrorDistribution: errorDistribution, // 에러 분포 추가
+		Percentiles:       nil,
+		TrimmedMeans:      trimmedMeans,
+		ErrorDistribution: errorDistribution,
 	}
 
 	return &result, nil
 }
 
-// RunConcurrentBenchmark runs benchmark with concurrent connections like wrk
+// RunConcurrentBenchmark with API chain support
 func (e *APIExecutor) RunConcurrentBenchmark(execInfo *types.APIExecutionInfo, concurrency int, duration time.Duration, rateLimit int) (*types.BenchmarkResult, error) {
+	// API Chain logic REMOVED - already handled in PrepareAPIExecution
+
 	fmt.Printf("🚀 Starting concurrent benchmark:\n")
 	fmt.Printf("   Concurrent Connections: %d\n", concurrency)
 	if duration > 0 {
@@ -258,12 +262,12 @@ func (e *APIExecutor) RunConcurrentBenchmark(execInfo *types.APIExecutionInfo, c
 	}
 
 	// Start and end time
-	startTime := time.Now()
+	benchmarkStartTime := time.Now()
 	var endTime time.Time
 	if duration > 0 {
-		endTime = startTime.Add(duration)
+		endTime = benchmarkStartTime.Add(duration)
 	} else {
-		endTime = startTime.Add(time.Hour) // Long enough time
+		endTime = benchmarkStartTime.Add(time.Hour)
 	}
 
 	// Worker pool
@@ -272,7 +276,6 @@ func (e *APIExecutor) RunConcurrentBenchmark(execInfo *types.APIExecutionInfo, c
 		go func(workerID int) {
 			defer wg.Done()
 
-			// HTTP client per worker for connection reuse
 			client := &http.Client{
 				Timeout: e.Timeout,
 				Transport: &http.Transport{
@@ -283,11 +286,11 @@ func (e *APIExecutor) RunConcurrentBenchmark(execInfo *types.APIExecutionInfo, c
 			}
 
 			for time.Now().Before(endTime) {
-				// Rate limiting
 				if rateLimiter != nil {
 					<-rateLimiter
 				}
 
+				// Execute main API only (prerequisite already handled)
 				result := e.executeRequestWithClient(execInfo, client, workerID)
 				results <- result
 
@@ -304,14 +307,17 @@ func (e *APIExecutor) RunConcurrentBenchmark(execInfo *types.APIExecutionInfo, c
 		}(i)
 	}
 
-	// Wait for completion
 	go func() {
 		wg.Wait()
 		close(results)
 	}()
 
-	// Collect results
-	return e.collectConcurrentResults(results, startTime)
+	benchmarkResult, err := e.collectConcurrentResults(results, benchmarkStartTime)
+	if err != nil {
+		return nil, err
+	}
+
+	return benchmarkResult, nil
 }
 
 // executeRequestWithClient executes HTTP request with provided client
