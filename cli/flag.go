@@ -137,9 +137,9 @@ func printResults(result *types.BenchmarkResult) {
 	fmt.Printf("Minimum: %v\n", result.MinTime)
 	fmt.Printf("Maximum: %v\n", result.MaxTime)
 	if result.TrimmedMeans != nil {
-		fmt.Printf("90%% Trimmed Average: %v\n", result.TrimmedMeans["90% "])
-		fmt.Printf("95%% Trimmed Average: %v\n", result.TrimmedMeans["95% "])
-		fmt.Printf("99%% Trimmed Average: %v\n", result.TrimmedMeans["99% "])
+		fmt.Printf("90%% Trimmed Average: %v\n", result.TrimmedMeans["90%"])
+		fmt.Printf("95%% Trimmed Average: %v\n", result.TrimmedMeans["95%"])
+		fmt.Printf("99%% Trimmed Average: %v\n", result.TrimmedMeans["99%"])
 	}
 
 	if len(result.ErrorDistribution) > 0 {

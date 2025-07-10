@@ -1,7 +1,9 @@
 FROM golang:1.24.4-alpine AS builder
-WORKDIR /src
+
+WORKDIR /root
 
 COPY ctrlbench/go.mod ctrlbench/go.sum ./
+
 RUN go mod download
 
 COPY ctrlbench/. ./
@@ -9,12 +11,14 @@ COPY ctrlbench/. ./
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -o ctrlbench main.go
 
-FROM busybox:1.35.0
+FROM alpine:3.18
 
-COPY --from=builder /src/ctrlbench /usr/local/bin/ctrlbench
+RUN apk add --no-cache bash
 
-COPY openapi/ /etc/ctrlbench/openapi/
+COPY --from=builder /root/ctrlbench /usr/local/bin/ctrlbench
 
-ENV OPENAPI_PATH=/etc/ctrlbench/openapi
+COPY openapi/ /root/openapi/
+
+ENV OPENAPI_PATH=/root/openapi/
 
 ENTRYPOINT ["tail", "-f", "/dev/null"]

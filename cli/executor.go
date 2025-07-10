@@ -574,61 +574,68 @@ func calculatePercentiles(durations []time.Duration) map[string]time.Duration {
 	}
 }
 
-// calculateTrimmedMeans calculates trimmed means by removing outliers
+// calculateTrimmedMeans 전체 수정 - 안전한 버전
 func calculateTrimmedMeans(durations []time.Duration) map[string]time.Duration {
 	if len(durations) == 0 {
-		return nil
+		return map[string]time.Duration{
+			"90%": 0,
+			"95%": 0,
+			"99%": 0,
+		}
 	}
+
+	fmt.Printf("🔍 Computing trimmed means from %d samples\n", len(durations))
+
+	// Sort durations
+	sortedDurations := make([]time.Duration, len(durations))
+	copy(sortedDurations, durations)
+	sort.Slice(sortedDurations, func(i, j int) bool {
+		return sortedDurations[i] < sortedDurations[j]
+	})
 
 	trimmedMeans := make(map[string]time.Duration)
 
-	// Sort durations for trimmed mean calculation
-	sort.Slice(durations, func(i, j int) bool {
-		return durations[i] < durations[j]
-	})
+	// 90% trimmed mean (remove top/bottom 5% each)
+	trimmedMeans["90%"] = safeTrimmedMean(sortedDurations, 0.05)
 
-	// Calculate trimmed means
-	trimmedMeans["90%"] = calculateTrimmedMean(durations, 0.90)
-	trimmedMeans["95%"] = calculateTrimmedMean(durations, 0.95)
-	trimmedMeans["99%"] = calculateTrimmedMean(durations, 0.99)
+	// 95% trimmed mean (remove top/bottom 2.5% each)
+	trimmedMeans["95%"] = safeTrimmedMean(sortedDurations, 0.025)
+
+	// 99% trimmed mean (remove top/bottom 0.5% each)
+	trimmedMeans["99%"] = safeTrimmedMean(sortedDurations, 0.005)
 
 	return trimmedMeans
 }
 
-// calculateTrimmedMean 함수에 디버그 추가
-func calculateTrimmedMean(sortedDurations []time.Duration, percentage float64) time.Duration {
+// safeTrimmedMean - 백분위 기반으로 더 정확하게
+func safeTrimmedMean(sortedDurations []time.Duration, removeRatio float64) time.Duration {
 	n := len(sortedDurations)
 	if n == 0 {
 		return 0
 	}
 
-	// Calculate how many values to trim from each end
-	trimCount := int(float64(n) * (1.0 - percentage) / 2.0)
+	// 백분위로 계산해서 더 정확한 인덱스 결정
+	startIndex := int(float64(n)*removeRatio + 0.5) // 반올림
+	endIndex := n - startIndex
 
-	// Ensure we don't trim everything
-	if trimCount >= n/2 {
-		trimCount = n / 4
-	}
-
-	start := trimCount
-	end := n - trimCount
-
-	if start >= end {
-		return calculateAverage(sortedDurations)
+	// 최소한 하나는 남겨야 함
+	if startIndex >= endIndex {
+		result := calculateAverage(sortedDurations)
+		fmt.Printf("   %.1f%% trimmed: too aggressive, using full average: %v\n",
+			(1.0-2*removeRatio)*100, result)
+		return result
 	}
 
 	var sum time.Duration
-	count := 0
-	for i := start; i < end; i++ {
+	count := endIndex - startIndex
+	for i := startIndex; i < endIndex; i++ {
 		sum += sortedDurations[i]
-		count++
-	}
-
-	if count == 0 {
-		return calculateAverage(sortedDurations)
 	}
 
 	result := sum / time.Duration(count)
+	fmt.Printf("   %.1f%% trimmed: range=[%d:%d], result=%v (from %d samples)\n",
+		(1.0-2*removeRatio)*100, startIndex, endIndex, result, count)
+
 	return result
 }
 
