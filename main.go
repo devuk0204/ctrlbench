@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -82,7 +81,7 @@ func handleBuildCommand(services map[string]types.ServiceMetadata) {
 
 	err := cli.BuildConfiguration(services, nfFilters)
 	if err != nil {
-		log.Printf("  Failed to build configuration: %v", err)
+		log.Printf("Failed to build configuration: %v", err)
 		os.Exit(1)
 	}
 }
@@ -97,10 +96,6 @@ func handleAPIExecution() {
 	if err != nil {
 		log.Fatalf("Failed to prepare API execution: %v", err)
 	}
-
-	// Print execution details
-	printExecutionDetails(execInfo)
-
 	// Execute benchmark based on flags
 	// Only use concurrent benchmark when -c flag is explicitly set > 1
 	if *concurrency > 1 {
@@ -108,23 +103,6 @@ func handleAPIExecution() {
 	} else {
 		runSequentialBenchmark(executor, execInfo)
 	}
-}
-
-// printExecutionDetails prints API execution information
-func printExecutionDetails(execInfo *types.APIExecutionInfo) {
-	fmt.Printf("  Execution Details:\n")
-	fmt.Printf("   NF: %s\n", execInfo.NF)
-	fmt.Printf("   API: %s\n", execInfo.APIName)
-	fmt.Printf("   Method: %s\n", execInfo.Method)
-	fmt.Printf("   Path: %s\n", execInfo.Path)
-	fmt.Printf("   Discovered URL: %s\n", execInfo.DiscoveredURL)
-	fmt.Printf("   Parameters: %v\n", execInfo.Parameters)
-
-	if execInfo.RequestBody != nil {
-		bodyBytes, _ := json.Marshal(execInfo.RequestBody)
-		fmt.Printf("   Request Body: %s\n", string(bodyBytes))
-	}
-	fmt.Println()
 }
 
 // runConcurrentBenchmark executes concurrent benchmark

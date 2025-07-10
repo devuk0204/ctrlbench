@@ -42,7 +42,6 @@ func (c *NFDiscoveryClient) DiscoverNF(
 	}
 
 	fullURL := base + "?" + q.Encode()
-	fmt.Printf("🔍 NRF discovery URL : %s\n", fullURL)
 
 	req, err := http.NewRequest(http.MethodGet, fullURL, nil)
 	if err != nil {
@@ -114,7 +113,7 @@ func (c *NFDiscoveryClient) DiscoverAndGetURL(
 		}
 	}
 	if url, ok := c.nfURLfromProfile(res.NFInstances[0]); ok {
-		fmt.Printf("⚠️  NF URL (fallback): %s\n", url)
+		fmt.Printf("NF URL (fallback): %s\n", url)
 		return url, nil
 	}
 	return "", fmt.Errorf("no suitable ipEndPoint found")
@@ -137,7 +136,7 @@ func BuildNFDiscoveryURL(
 	client := NewNFDiscoveryClient(nrfURL, 10*time.Second)
 	url, err := client.DiscoverAndGetURL(targetNFType, reqType, reqID)
 	if err != nil {
-		fmt.Printf("❌ NF discovery error: %v\n", err)
+		fmt.Printf("NF discovery error: %v\n", err)
 		return "", err
 	}
 	return url, nil

@@ -20,6 +20,12 @@ type RequestBuilder struct{}
 var (
 	// Global cache for once_before_benchmark chains
 	onceBenchmarkCache = make(map[string]*types.ChainExecutionResult)
+
+	// 체인 구성 확인 결과 캐싱을 위한 새 캐시
+	chainConfigCache = make(map[string]*types.APIChainConfig)
+
+	// API 실행 정보 캐시 (벤치마크에서 재사용)
+	preparedAPICache = make(map[string]*types.APIExecutionInfo)
 )
 
 // NewRequestBuilder creates a new request builder
@@ -29,19 +35,34 @@ func NewRequestBuilder() *RequestBuilder {
 
 // PrepareAPIExecution prepares API execution info from configuration with detailed validation
 func (rb *RequestBuilder) PrepareAPIExecution(apiList types.APIList, config map[string]interface{}, nf, apiName string) (*types.APIExecutionInfo, error) {
-	return rb.prepareAPIExecutionWithChainFlag(apiList, config, nf, apiName, false)
+	// 캐시 키 생성
+	cacheKey := fmt.Sprintf("%s_%s_prepared", nf, apiName)
+
+	// 이미 준비된 API 정보가 있는지 확인
+	if cachedInfo, exists := preparedAPICache[cacheKey]; exists {
+		fmt.Printf("🔄 Using cached prepared API info for %s_%s\n", nf, apiName)
+		return cachedInfo, nil
+	}
+
+	// 없으면 새로 준비
+	result, err := rb.prepareAPIExecutionWithChainFlag(apiList, config, nf, apiName, false)
+	if err != nil {
+		return nil, err
+	}
+
+	// 성공적으로 준비된 정보 캐싱
+	preparedAPICache[cacheKey] = result
+	return result, nil
 }
 
 // Internal method with chain prevention flag
 func (rb *RequestBuilder) prepareAPIExecutionWithChainFlag(apiList types.APIList, config map[string]interface{}, nf, apiName string, skipChain bool) (*types.APIExecutionInfo, error) {
-	fmt.Printf("🔍 DEBUG: Starting PrepareAPIExecution for NF=%s, API=%s, skipChain=%v\n", nf, apiName, skipChain)
+	fmt.Printf("Starting PrepareAPIExecution for NF=%s, API=%s, skipChain=%v\n", nf, apiName, skipChain)
 
 	apiInfo, servicePath, err := rb.GetAPIInfoWithServicePath(apiList, nf, apiName)
 	if err != nil {
 		return nil, err
 	}
-
-	fmt.Printf("🔍 DEBUG: Found API info - Service path: %s, API path: %s\n", servicePath, apiInfo.Path)
 
 	userInputs, ok := config["user_inputs"].(map[string]interface{})
 	if !ok {
@@ -53,27 +74,48 @@ func (rb *RequestBuilder) prepareAPIExecutionWithChainFlag(apiList types.APIList
 
 	// Check if this API has chain configuration ONLY if not skipping chain
 	if !skipChain {
-		chainConfig, err = GetAPIChainConfig(config, apiName)
-		if err != nil {
-			fmt.Printf("❌ Error getting chain config: %v\n", err)
-			return nil, fmt.Errorf("failed to get chain config: %w", err)
+		// 체인 구성 캐시 키 생성
+		cacheKey := fmt.Sprintf("%s_%s_config", nf, apiName)
+
+		// 캐시에서 먼저 확인
+		if cachedConfig, exists := chainConfigCache[cacheKey]; exists {
+			chainConfig = cachedConfig
+			if chainConfig != nil {
+				fmt.Printf("API Chain detected for %s\n", apiName)
+				fmt.Printf("Chain type: %s\n", chainConfig.ChainType)
+				fmt.Printf("Prerequisite API: %s\n", chainConfig.PrerequisiteAPI)
+			}
+		} else {
+			// 캐시에 없으면 확인하고 저장
+			chainConfig, err = GetAPIChainConfig(config, apiName)
+			if err != nil {
+				fmt.Printf("Error getting chain config: %v\n", err)
+				return nil, fmt.Errorf("failed to get chain config: %w", err)
+			}
+
+			// 결과 캐싱 (nil도 캐싱)
+			chainConfigCache[cacheKey] = chainConfig
+
+			if chainConfig == nil {
+				fmt.Printf("No chain configuration found for API: %s\n", apiName)
+			} else {
+				fmt.Printf("API Chain detected for %s\n", apiName)
+				fmt.Printf("Chain type: %s\n", chainConfig.ChainType)
+				fmt.Printf("Prerequisite API: %s\n", chainConfig.PrerequisiteAPI)
+			}
 		}
 
 		// Execute prerequisite API if chain is configured
 		if chainConfig != nil {
-			fmt.Printf("🔗 API Chain detected for %s\n", apiName)
-			fmt.Printf("🔗 Chain type: %s\n", chainConfig.ChainType)
-			fmt.Printf("🔗 Prerequisite API: %s\n", chainConfig.PrerequisiteAPI)
-
 			// Check if this is a once_before_benchmark chain and already executed
-			cacheKey := fmt.Sprintf("%s_%s", apiName, chainConfig.PrerequisiteAPI)
+			chainCacheKey := fmt.Sprintf("%s_%s", apiName, chainConfig.PrerequisiteAPI)
 
 			if chainConfig.ChainType == "once_before_benchmark" {
-				if cachedResult, exists := onceBenchmarkCache[cacheKey]; exists {
-					fmt.Printf("🔗 ✅ Using cached result from once_before_benchmark execution\n")
+				if cachedResult, exists := onceBenchmarkCache[chainCacheKey]; exists {
+					fmt.Printf("Using cached result from once_before_benchmark execution\n")
 					chainResult = cachedResult
 				} else {
-					fmt.Printf("🔗 🚀 Executing once_before_benchmark prerequisite API\n")
+					fmt.Printf("Executing once_before_benchmark prerequisite API\n")
 					// Execute prerequisite API first
 					chainResult, err = rb.executePrerequisiteAPI(chainConfig, config, apiList)
 					if err != nil {
@@ -81,8 +123,8 @@ func (rb *RequestBuilder) prepareAPIExecutionWithChainFlag(apiList types.APIList
 					}
 
 					// Cache the result
-					onceBenchmarkCache[cacheKey] = chainResult
-					fmt.Printf("✅ Prerequisite API completed and cached\n")
+					onceBenchmarkCache[chainCacheKey] = chainResult
+					fmt.Printf("Prerequisite API completed and cached\n")
 				}
 			} else {
 				// Execute prerequisite API first (normal chains)
@@ -91,13 +133,11 @@ func (rb *RequestBuilder) prepareAPIExecutionWithChainFlag(apiList types.APIList
 					return nil, fmt.Errorf("prerequisite API execution failed: %w", err)
 				}
 
-				fmt.Printf("✅ Prerequisite API completed successfully\n")
+				fmt.Printf("Prerequisite API completed successfully\n")
 			}
-		} else {
-			fmt.Printf("🔍 DEBUG: No chain configuration found for API: %s\n", apiName)
 		}
 	} else {
-		fmt.Printf("🔍 DEBUG: Skipping chain check for prerequisite API: %s\n", apiName)
+		fmt.Printf("Skipping chain check for prerequisite API: %s\n", apiName)
 	}
 
 	// Initialize collections
@@ -134,9 +174,9 @@ func (rb *RequestBuilder) prepareAPIExecutionWithChainFlag(apiList types.APIList
 				if err == nil && extractedValue != "" {
 					if strVal, ok := extractedValue.(string); ok {
 						paramValue = strVal
-						fmt.Printf("🔗 Applied parameter mapping: %s = %s (from %s)\n", p.Name, paramValue, mappedValue)
+						fmt.Printf("Applied parameter mapping: %s = %s (from %s)\n", p.Name, paramValue, mappedValue)
 					} else {
-						fmt.Printf("❌ Extracted value for parameter mapping '%s' is not a string\n", p.Name)
+						fmt.Printf("Extracted value for parameter mapping '%s' is not a string\n", p.Name)
 					}
 				}
 			}
@@ -144,8 +184,8 @@ func (rb *RequestBuilder) prepareAPIExecutionWithChainFlag(apiList types.APIList
 
 		// Required parameter validation
 		if p.Required && paramValue == "" {
-			fmt.Printf("❌ Required parameter '%s' is empty or missing\n", p.Name)
-			fmt.Printf("📋 Please fill the 'value' field for '%s' in configuration.yaml\n", p.Name)
+			fmt.Printf("Required parameter '%s' is empty or missing\n", p.Name)
+			fmt.Printf("Please fill the 'value' field for '%s' in configuration.yaml\n", p.Name)
 			return nil, fmt.Errorf("required parameter '%s' is empty or missing (check configuration.yaml)", p.Name)
 		}
 
@@ -169,13 +209,11 @@ func (rb *RequestBuilder) prepareAPIExecutionWithChainFlag(apiList types.APIList
 					var extractedValue interface{}
 					var err error
 
-					fmt.Printf("🔗 DEBUG: Trying to map field '%s' using mapping '%s'\n", fieldName, mappedValue)
-
 					// First check if it's a special computed value (like resStar)
 					if chainResult.ExtractedData != nil {
-						fmt.Printf("🔗 DEBUG: ExtractedData available, contents:\n")
 						for key, value := range chainResult.ExtractedData {
-							fmt.Printf("🔗   %s: %v\n", key, value)
+							fmt.Printf("ExtractedData available, contents:\n")
+							fmt.Printf("%s: %v\n", key, value)
 						}
 
 						// Try multiple possible keys for resStar
@@ -185,35 +223,33 @@ func (rb *RequestBuilder) prepareAPIExecutionWithChainFlag(apiList types.APIList
 							if val, exists := chainResult.ExtractedData[key]; exists {
 								extractedValue = val
 								err = nil
-								fmt.Printf("🔗 DEBUG: Found value using key '%s': %v\n", key, val)
+								fmt.Printf("Found value using key '%s': %v\n", key, val)
 								break
 							}
 						}
 
 						if extractedValue == nil {
-							fmt.Printf("🔗 DEBUG: No value found in ExtractedData, trying JSONPath extraction\n")
 							// Fallback to JSONPath extraction
 							extractedValue, err = ExtractValueFromResponse(chainResult.ResponseBody, mappedValue)
 						}
 					} else {
-						fmt.Printf("🔗 DEBUG: ExtractedData is nil, using JSONPath extraction only\n")
 						// Normal JSONPath extraction
 						extractedValue, err = ExtractValueFromResponse(chainResult.ResponseBody, mappedValue)
 					}
 
 					if err == nil && extractedValue != "" {
 						fieldValue = extractedValue
-						fmt.Printf("🔗 ✅ Applied request body mapping: %s = %s (from %s)\n", fieldName, fieldValue, mappedValue)
+						fmt.Printf("Applied request body mapping: %s = %s (from %s)\n", fieldName, fieldValue, mappedValue)
 					} else {
-						fmt.Printf("🔗 ❌ Failed to extract value for mapping '%s': %v\n", mappedValue, err)
+						fmt.Printf("Failed to extract value for mapping '%s': %v\n", mappedValue, err)
 					}
 				}
 			}
 
 			// Required field validation
 			if fieldValue == nil || fieldValue == "" {
-				fmt.Printf("❌ Required request body field '%s' is empty or missing\n", fieldName)
-				fmt.Printf("📋 Please fill the 'value' field for '%s' in configuration.yaml under '%s' schema\n", fieldName, schemaName)
+				fmt.Printf("Required request body field '%s' is empty or missing\n", fieldName)
+				fmt.Printf("Please fill the 'value' field for '%s' in configuration.yaml under '%s' schema\n", fieldName, schemaName)
 				return nil, fmt.Errorf("required request body field '%s' is empty or missing (check configuration.yaml)", fieldName)
 			}
 
@@ -227,7 +263,7 @@ func (rb *RequestBuilder) prepareAPIExecutionWithChainFlag(apiList types.APIList
 		requestBody = GetDefaultRequestBodyForType(apiInfo.RequestBody)
 	}
 
-	fmt.Printf("✅ Configuration validation passed - ready for execution\n")
+	fmt.Printf("Configuration validation passed - ready for execution\n")
 
 	execInfo := &types.APIExecutionInfo{
 		NF:          nf,
@@ -263,9 +299,9 @@ func (rb *RequestBuilder) prepareAPIExecutionWithChainFlag(apiList types.APIList
 				if err == nil && extractedValue != "" {
 					if strVal, ok := extractedValue.(string); ok {
 						execInfo.Headers[headerName] = strVal
-						fmt.Printf("🔗 Applied header mapping: %s = %s (from %s)\n", headerName, strVal, mappedValue)
+						fmt.Printf("Applied header mapping: %s = %s (from %s)\n", headerName, strVal, mappedValue)
 					} else {
-						fmt.Printf("❌ Extracted value for header mapping '%s' is not a string\n", headerName)
+						fmt.Printf("Extracted value for header mapping '%s' is not a string\n", headerName)
 					}
 				}
 			}
@@ -277,7 +313,7 @@ func (rb *RequestBuilder) prepareAPIExecutionWithChainFlag(apiList types.APIList
 
 // executePrerequisiteAPI executes prerequisite API and returns the result (simplified version)
 func (rb *RequestBuilder) executePrerequisiteAPI(chainConfig *types.APIChainConfig, config map[string]interface{}, apiList types.APIList) (*types.ChainExecutionResult, error) {
-	fmt.Printf("🔗 Executing prerequisite API: %s\n", chainConfig.PrerequisiteAPI)
+	fmt.Printf("Executing prerequisite API: %s\n", chainConfig.PrerequisiteAPI)
 
 	// Parse prerequisite API name
 	prereqNF, prereqAPI := ParseAPIName(chainConfig.PrerequisiteAPI)
@@ -314,7 +350,7 @@ func (rb *RequestBuilder) executePrerequisiteAPI(chainConfig *types.APIChainConf
 	// For Debug: replace discovered URL with a specific IP if needed
 	if discoveredURL == "http://controlplane-free5gc-ausf-service:80" {
 		discoveredURL = "http://10.96.43.148:80"
-		fmt.Printf("🔧 DEBUG: Replaced AUSF service URL with IP: %s\n", discoveredURL)
+		fmt.Printf("Replaced AUSF service URL with IP: %s\n", discoveredURL)
 	}
 	// Setup execution info
 	prereqExecInfo.DiscoveredURL = discoveredURL
@@ -324,7 +360,7 @@ func (rb *RequestBuilder) executePrerequisiteAPI(chainConfig *types.APIChainConf
 	finalURL := rb.BuildFinalURL(prereqExecInfo)
 	prereqExecInfo.FinalURL = finalURL
 
-	fmt.Printf("🔗 Prerequisite API URL: %s\n", finalURL)
+	fmt.Printf("Prerequisite API URL: %s\n", finalURL)
 
 	// Execute using HTTP client (compatible with http_client.go)
 	httpClient := NewHTTPClient() // From http_client.go
@@ -337,8 +373,8 @@ func (rb *RequestBuilder) executePrerequisiteAPI(chainConfig *types.APIChainConf
 		}, result.Error
 	}
 
-	fmt.Printf("✅ Prerequisite API completed: %d\n", result.StatusCode)
-	fmt.Printf("🔗 Prerequisite API response: %s\n", string(result.ResponseBody))
+	fmt.Printf("Prerequisite API completed: %d\n", result.StatusCode)
+	fmt.Printf("Prerequisite API response: %s\n", string(result.ResponseBody))
 
 	// Special handling for PostUeAuthentications to compute resStar
 	chainResult := &types.ChainExecutionResult{
@@ -350,18 +386,18 @@ func (rb *RequestBuilder) executePrerequisiteAPI(chainConfig *types.APIChainConf
 	// Check if the prerequisite API is PostUeAuthentications and compute resStar
 	if strings.Contains(strings.ToLower(chainConfig.PrerequisiteAPI), "postuea") ||
 		strings.Contains(strings.ToLower(chainConfig.PrerequisiteAPI), "authentication") {
-		fmt.Printf("🔐 Detected PostUeAuthentications - computing resStar\n")
+		fmt.Printf("Detected PostUeAuthentications - computing resStar\n")
 
 		resStar, err := rb.computeResStar(string(result.ResponseBody), config)
 		if err != nil {
-			fmt.Printf("❌ Failed to compute resStar: %v\n", err)
+			fmt.Printf("Failed to compute resStar: %v\n", err)
 		} else {
 			// Add resStar to the chain result for mapping
 			if chainResult.ExtractedData == nil {
 				chainResult.ExtractedData = make(map[string]interface{})
 			}
 			chainResult.ExtractedData["resStar"] = hex.EncodeToString(resStar)
-			fmt.Printf("✅ Computed resStar: %s\n", hex.EncodeToString(resStar))
+			fmt.Printf("Computed resStar: %s\n", hex.EncodeToString(resStar))
 		}
 	}
 
@@ -379,20 +415,16 @@ func (rb *RequestBuilder) BuildFinalURL(execInfo *types.APIExecutionInfo) string
 
 	var queryParams []string
 
-	// Replace path parameters and collect query parameters
-	fmt.Printf("🔍 DEBUG: Original path: %s\n", path)
-	fmt.Printf("🔍 DEBUG: Available parameters: %v\n", execInfo.Parameters)
-
 	for paramName, paramValue := range execInfo.Parameters {
 		placeholder := "{" + paramName + "}"
 		if strings.Contains(path, placeholder) {
 			// Path parameter
 			path = strings.Replace(path, placeholder, paramValue, -1)
-			fmt.Printf("🔗 ✅ Replaced path parameter: %s -> %s\n", placeholder, paramValue)
+			fmt.Printf("Replaced path parameter: %s -> %s\n", placeholder, paramValue)
 		} else {
 			// Query parameter
 			queryParams = append(queryParams, paramName+"="+paramValue)
-			fmt.Printf("🔗 ✅ Added query parameter: %s=%s\n", paramName, paramValue)
+			fmt.Printf("Added query parameter: %s=%s\n", paramName, paramValue)
 		}
 	}
 
@@ -406,10 +438,8 @@ func (rb *RequestBuilder) BuildFinalURL(execInfo *types.APIExecutionInfo) string
 
 	// Check for any remaining unreplaced parameters
 	if strings.Contains(finalURL, "{") && strings.Contains(finalURL, "}") {
-		fmt.Printf("⚠️  WARNING: Unreplaced parameters found in URL: %s\n", finalURL)
+		fmt.Printf("WARNING: Unreplaced parameters found in URL: %s\n", finalURL)
 	}
-
-	fmt.Printf("🔍 DEBUG: BuildFinalURL - Base: %s, Path: %s, Final: %s\n", baseURL, path, finalURL)
 
 	return finalURL
 }
@@ -644,7 +674,7 @@ func (rb *RequestBuilder) computeResStar(responseBody string, config map[string]
 		return nil, fmt.Errorf("failed to perform UE authentication: %w", err)
 	}
 
-	fmt.Printf("🔐 Computed XRES* (resStar): %s\n", hex.EncodeToString(ueAuth.ResStar))
+	fmt.Printf("Computed XRES* (resStar): %s\n", hex.EncodeToString(ueAuth.ResStar))
 
 	return ueAuth.ResStar, nil
 }

@@ -75,7 +75,7 @@ func (e *APIExecutor) ExecuteAPI(targetNF, apiName string) (*types.APIExecutionI
 			return nil, fmt.Errorf("NRF URL is required in configuration for NRF target")
 		}
 		discoveredURL = nrfURL
-		fmt.Printf("✅ Using direct NRF URL: %s\n", discoveredURL)
+		fmt.Printf("Using direct NRF URL: %s\n", discoveredURL)
 	} else {
 		// Discover NF URL for other NFs
 		var err error
@@ -89,23 +89,15 @@ func (e *APIExecutor) ExecuteAPI(targetNF, apiName string) (*types.APIExecutionI
 			discoveredURL = "http://10.96.43.148:80"
 		}
 
-		fmt.Printf("✅ Discovered %s URL: %s\n", targetNF, discoveredURL)
+		fmt.Printf("Discovered %s URL: %s\n", targetNF, discoveredURL)
 	}
 
 	e.requestBuilder.PopulateHeaders(execInfo, targetNF, config)
-
-	// Print header debug info once here
-	fmt.Printf("🔍 DEBUG: Request headers:\n")
-	fmt.Printf("🔍 DEBUG: Headers count: %d\n", len(execInfo.Headers))
-	for key, value := range execInfo.Headers {
-		fmt.Printf("🔍 DEBUG: Header[%s] = %s\n", key, value)
-	}
 
 	// Build and store final URL
 	execInfo.DiscoveredURL = discoveredURL
 	finalURL := e.requestBuilder.BuildFinalURL(execInfo)
 	execInfo.FinalURL = finalURL
-	fmt.Printf("🔗 Final URL: %s\n", finalURL)
 	if !strings.HasPrefix(finalURL, "http://") && !strings.HasPrefix(finalURL, "https://") {
 		return nil, fmt.Errorf("invalid URL format: %s", finalURL)
 	}
@@ -130,9 +122,9 @@ func (e *APIExecutor) ExecuteHTTPCall(execInfo *types.APIExecutionInfo) (time.Du
 	return result.Duration, nil
 }
 
-// RunBenchmark with before_each_call support - PrepareAPIExecution called every iteration
+// RunBenchmark with improved caching - PrepareAPIExecution called only once
 func (e *APIExecutor) RunBenchmark(execInfo *types.APIExecutionInfo, iterations int, duration time.Duration, rateLimit int) (*types.BenchmarkResult, error) {
-	fmt.Printf("🚀 Starting sequential benchmark:\n")
+	fmt.Printf("Starting sequential benchmark:\n")
 	if duration > 0 {
 		fmt.Printf("   Duration: %v\n", duration)
 	} else {
@@ -140,12 +132,6 @@ func (e *APIExecutor) RunBenchmark(execInfo *types.APIExecutionInfo, iterations 
 	}
 	if rateLimit > 0 {
 		fmt.Printf("   Rate Limit: %d req/s\n", rateLimit)
-	}
-
-	// Load API list and config once for reuse
-	apiList, err := e.requestBuilder.LoadAPIList()
-	if err != nil {
-		return nil, fmt.Errorf("failed to load API list: %w", err)
 	}
 
 	config, err := LoadConfiguration()
@@ -179,6 +165,54 @@ func (e *APIExecutor) RunBenchmark(execInfo *types.APIExecutionInfo, iterations 
 	// Benchmark start time
 	benchmarkStartTime := time.Now()
 
+	currentExecInfo := execInfo // 이미 준비된 execInfo 사용
+
+	if currentExecInfo.DiscoveredURL == "" {
+		if strings.ToUpper(execInfo.NF) == "NRF" {
+			nrfURL, ok := GetConfigString(globalSettings["nrf_url"])
+			if !ok || nrfURL == "" {
+				return nil, fmt.Errorf("NRF URL is missing")
+			}
+			currentExecInfo.DiscoveredURL = nrfURL
+		} else {
+			discoveredURL, err := e.discoverNFURL(globalSettings, execInfo.NF)
+			if err != nil {
+				return nil, fmt.Errorf("discovery failed: %w", err)
+			}
+			// For testing purposes, replace discovered URL
+			if discoveredURL == "http://controlplane-free5gc-ausf-service:80" {
+				discoveredURL = "http://10.96.43.148:80"
+			}
+			fmt.Printf("Discovered %s URL: %s\n", execInfo.NF, discoveredURL)
+			currentExecInfo.DiscoveredURL = discoveredURL
+		}
+	}
+
+	e.requestBuilder.PopulateHeaders(currentExecInfo, execInfo.NF, config)
+	for key, value := range currentExecInfo.Headers {
+		fmt.Printf("Header[%s] = %s\n", key, value)
+	}
+
+	currentExecInfo.FinalURL = e.requestBuilder.BuildFinalURL(currentExecInfo)
+
+	fmt.Printf("Final URL: %s\n", currentExecInfo.FinalURL)
+	fmt.Printf("Execution Details:\n")
+	fmt.Printf("   NF: %s\n", currentExecInfo.NF)
+	fmt.Printf("   API: %s\n", currentExecInfo.APIName)
+	fmt.Printf("   Method: %s\n", currentExecInfo.Method)
+	fmt.Printf("   Path: %s\n", currentExecInfo.Path)
+	fmt.Printf("   Discovered URL: %s\n", currentExecInfo.DiscoveredURL)
+	fmt.Printf("   Parameters: %v\n", currentExecInfo.Parameters)
+
+	// 요청 본문 출력
+	if reqBody, ok := currentExecInfo.RequestBody.(map[string]interface{}); ok {
+		bodyBytes, _ := json.Marshal(reqBody)
+		fmt.Printf("Request Body: %s\n", string(bodyBytes))
+	} else if currentExecInfo.RequestBody != nil {
+		fmt.Printf("Request Body: %v\n", currentExecInfo.RequestBody)
+	}
+	fmt.Printf("\n")
+
 	for {
 		// Rate limiting
 		if rateLimiter != nil {
@@ -198,51 +232,6 @@ func (e *APIExecutor) RunBenchmark(execInfo *types.APIExecutionInfo, iterations 
 
 		requestCount++
 
-		// ✅ 매번 새로 PrepareAPIExecution 호출 (체이닝 포함)
-		fmt.Printf("🔄 Preparing request %d (for before_each_call chain support)\n", requestCount)
-		currentExecInfo, err := e.requestBuilder.PrepareAPIExecution(apiList, config, execInfo.NF, execInfo.APIName)
-		if err != nil {
-			failureCount++
-			errorType := fmt.Sprintf("Prepare Error: %v", err)
-			errorDistribution[errorType]++
-			fmt.Printf("❌ Request %d preparation failed: %v\n", requestCount, err)
-			continue
-		}
-
-		// NF Discovery and URL setup for current request
-		var discoveredURL string
-		if strings.ToUpper(execInfo.NF) == "NRF" {
-			nrfURL, ok := GetConfigString(globalSettings["nrf_url"])
-			if !ok || nrfURL == "" {
-				failureCount++
-				errorType := "NRF URL missing"
-				errorDistribution[errorType]++
-				fmt.Printf("❌ Request %d failed: NRF URL missing\n", requestCount)
-				continue
-			}
-			discoveredURL = nrfURL
-		} else {
-			discoveredURL, err = e.discoverNFURL(globalSettings, execInfo.NF)
-			if err != nil {
-				failureCount++
-				errorType := fmt.Sprintf("Discovery Error: %v", err)
-				errorDistribution[errorType]++
-				fmt.Printf("❌ Request %d discovery failed: %v\n", requestCount, err)
-				continue
-			}
-
-			// For testing purposes, replace discovered URL
-			if discoveredURL == "http://controlplane-free5gc-ausf-service:80" {
-				discoveredURL = "http://10.96.43.148:80"
-			}
-		}
-
-		// Setup current execution info
-		currentExecInfo.DiscoveredURL = discoveredURL
-		e.requestBuilder.PopulateHeaders(currentExecInfo, execInfo.NF, config)
-		currentExecInfo.FinalURL = e.requestBuilder.BuildFinalURL(currentExecInfo)
-
-		// Execute HTTP call
 		execDuration, err := e.ExecuteHTTPCall(currentExecInfo)
 		allDurations = append(allDurations, execDuration)
 		totalTime += execDuration
@@ -260,10 +249,10 @@ func (e *APIExecutor) RunBenchmark(execInfo *types.APIExecutionInfo, iterations 
 			failureCount++
 			errorType := fmt.Sprintf("Error: %v", err)
 			errorDistribution[errorType]++
-			fmt.Printf("❌ Request %d failed: %v\n", requestCount, err)
+			fmt.Printf("Request %d failed: %v\n", requestCount, err)
 		} else {
 			successCount++
-			fmt.Printf("✅ Request %d completed in %v\n", requestCount, execDuration)
+			fmt.Printf("Request %d completed in %v\n", requestCount, execDuration)
 		}
 	}
 
@@ -296,19 +285,13 @@ func (e *APIExecutor) RunBenchmark(execInfo *types.APIExecutionInfo, iterations 
 
 // RunConcurrentBenchmark with before_each_call support - each worker prepares its own execution
 func (e *APIExecutor) RunConcurrentBenchmark(execInfo *types.APIExecutionInfo, concurrency int, duration time.Duration, rateLimit int) (*types.BenchmarkResult, error) {
-	fmt.Printf("🚀 Starting concurrent benchmark:\n")
-	fmt.Printf("   Concurrent Connections: %d\n", concurrency)
+	fmt.Printf("Starting concurrent benchmark:\n")
+	fmt.Printf("Concurrent Connections: %d\n", concurrency)
 	if duration > 0 {
-		fmt.Printf("   Duration: %v\n", duration)
+		fmt.Printf("Duration: %v\n", duration)
 	}
 	if rateLimit > 0 {
-		fmt.Printf("   Rate Limit: %d req/s\n", rateLimit)
-	}
-
-	// Load shared resources once
-	apiList, err := e.requestBuilder.LoadAPIList()
-	if err != nil {
-		return nil, fmt.Errorf("failed to load API list: %w", err)
+		fmt.Printf("Rate Limit: %d req/s\n", rateLimit)
 	}
 
 	config, err := LoadConfiguration()
@@ -318,6 +301,25 @@ func (e *APIExecutor) RunConcurrentBenchmark(execInfo *types.APIExecutionInfo, c
 
 	userInputs := config["user_inputs"].(map[string]interface{})
 	globalSettings := userInputs["global_settings"].(map[string]interface{})
+
+	for key, value := range execInfo.Headers {
+		fmt.Printf("Header[%s] = %s\n", key, value)
+	}
+	fmt.Printf("Final URL: %s\n", execInfo.FinalURL)
+	fmt.Printf("Execution Details:\n")
+	fmt.Printf("   NF: %s\n", execInfo.NF)
+	fmt.Printf("   API: %s\n", execInfo.APIName)
+	fmt.Printf("   Method: %s\n", execInfo.Method)
+	fmt.Printf("   Path: %s\n", execInfo.Path)
+	fmt.Printf("   Discovered URL: %s\n", execInfo.DiscoveredURL)
+	fmt.Printf("   Parameters: %v\n", execInfo.Parameters)
+	if reqBody, ok := execInfo.RequestBody.(map[string]interface{}); ok {
+		bodyBytes, _ := json.Marshal(reqBody)
+		fmt.Printf("Request Body: %s\n", string(bodyBytes))
+	} else if execInfo.RequestBody != nil {
+		fmt.Printf("Request Body: %v\n", execInfo.RequestBody)
+	}
+	fmt.Printf("\n")
 
 	// Results collection
 	results := make(chan *RequestResult, concurrency*100)
@@ -358,19 +360,7 @@ func (e *APIExecutor) RunConcurrentBenchmark(execInfo *types.APIExecutionInfo, c
 					<-rateLimiter
 				}
 
-				// ✅ 각 worker가 매번 새로 PrepareAPIExecution 호출
-				currentExecInfo, err := e.requestBuilder.PrepareAPIExecution(apiList, config, execInfo.NF, execInfo.APIName)
-				if err != nil {
-					results <- &RequestResult{
-						Duration:     0,
-						StatusCode:   0,
-						Error:        fmt.Errorf("prepare failed: %w", err),
-						WorkerID:     workerID,
-						Timestamp:    time.Now(),
-						ResponseBody: "",
-					}
-					continue
-				}
+				currentExecInfo := execInfo
 
 				// Setup URL and headers for current request
 				var discoveredURL string
@@ -421,9 +411,9 @@ func (e *APIExecutor) RunConcurrentBenchmark(execInfo *types.APIExecutionInfo, c
 				}
 
 				if result.Error != nil {
-					fmt.Printf("❌ Worker %d: %v\n", result.WorkerID, result.Error)
+					fmt.Printf("Worker %d: %v\n", result.WorkerID, result.Error)
 				} else {
-					fmt.Printf("✅ Worker %d: %d (%v)\n", result.WorkerID, result.StatusCode, result.Duration)
+					fmt.Printf("Worker %d: %d (%v)\n", result.WorkerID, result.StatusCode, result.Duration)
 				}
 			}
 		}(i)
@@ -629,19 +619,13 @@ func calculateTrimmedMean(sortedDurations []time.Duration, percentage float64) t
 	// Calculate how many values to trim from each end
 	trimCount := int(float64(n) * (1.0 - percentage) / 2.0)
 
-	// Debug output
-	fmt.Printf("🔍 DEBUG %.0f%% Trimmed: n=%d, trimCount=%d, ", percentage*100, n, trimCount)
-
 	// Ensure we don't trim everything
 	if trimCount >= n/2 {
 		trimCount = n / 4
-		fmt.Printf("adjusted trimCount=%d, ", trimCount)
 	}
 
 	start := trimCount
 	end := n - trimCount
-
-	fmt.Printf("using range [%d:%d]\n", start, end)
 
 	if start >= end {
 		return calculateAverage(sortedDurations)
@@ -659,7 +643,6 @@ func calculateTrimmedMean(sortedDurations []time.Duration, percentage float64) t
 	}
 
 	result := sum / time.Duration(count)
-	fmt.Printf("   Result: %v (from %d values)\n", result, count)
 	return result
 }
 

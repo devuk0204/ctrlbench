@@ -46,9 +46,6 @@ func NewHTTPClient() *HTTPClient {
 
 // PrepareHTTPRequest prepares HTTP request with body and headers
 func (c *HTTPClient) PrepareHTTPRequest(execInfo *types.APIExecutionInfo) (*http.Request, error) {
-	// Debug: URL 확인
-	fmt.Printf("🔍 DEBUG: Using URL: %s\n", execInfo.FinalURL)
-
 	var requestBody []byte
 	var err error
 
@@ -127,7 +124,6 @@ func (c *HTTPClient) ExecuteWithResult(execInfo *types.APIExecutionInfo, request
 	duration := time.Since(start)
 
 	if err != nil {
-		fmt.Printf("🔍 DEBUG: HTTP %s %s -> ERROR: %v (%v)\n", execInfo.Method, execInfo.FinalURL, err, duration)
 		return &HTTPResult{
 			Duration: duration,
 			Error:    err,
@@ -135,15 +131,12 @@ func (c *HTTPClient) ExecuteWithResult(execInfo *types.APIExecutionInfo, request
 	}
 	defer resp.Body.Close()
 
-	// Always show HTTP response log for each request
-	fmt.Printf("🔍 DEBUG: HTTP %s %s -> %d (%v)\n", execInfo.Method, execInfo.FinalURL, resp.StatusCode, duration)
-
 	// Read response body
 	bodyBytes, readErr := io.ReadAll(resp.Body)
 	responseBody := ""
 	if readErr == nil {
 		responseBody = string(bodyBytes)
-		fmt.Printf("📋 DEBUG: Response Body: %s\n", responseBody)
+		fmt.Printf("Response Body: %s\n", responseBody)
 	}
 
 	return &HTTPResult{

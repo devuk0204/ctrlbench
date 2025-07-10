@@ -23,9 +23,9 @@ func NewBenchmarkRunner() *BenchmarkRunner {
 
 // RunSequentialBenchmark runs benchmark with sequential requests
 func (b *BenchmarkRunner) RunSequentialBenchmark(execInfo *types.APIExecutionInfo, iterations int) (*types.BenchmarkResult, error) {
-	fmt.Printf("🚀 Starting sequential benchmark with %d iterations...\n", iterations)
-	fmt.Printf("📍 Target: %s\n", execInfo.DiscoveredURL+execInfo.Path)
-	fmt.Printf("🔧 Method: %s\n", execInfo.Method)
+	fmt.Printf("Starting sequential benchmark with %d iterations...\n", iterations)
+	fmt.Printf("Target: %s\n", execInfo.DiscoveredURL+execInfo.Path)
+	fmt.Printf("Method: %s\n", execInfo.Method)
 	fmt.Println()
 
 	var durations []time.Duration
@@ -40,15 +40,15 @@ func (b *BenchmarkRunner) RunSequentialBenchmark(execInfo *types.APIExecutionInf
 		if result.Error != nil {
 			failureCount++
 			errorDistribution[result.Error.Error()]++
-			fmt.Printf("❌ Request %d failed: %v\n", i+1, result.Error)
+			fmt.Printf("Request %d failed: %v\n", i+1, result.Error)
 		} else if result.StatusCode >= 200 && result.StatusCode < 300 {
 			successCount++
-			fmt.Printf("✅ Request %d: %d - %v\n", i+1, result.StatusCode, result.Duration)
+			fmt.Printf("Request %d: %d - %v\n", i+1, result.StatusCode, result.Duration)
 		} else {
 			failureCount++
 			errorMsg := fmt.Sprintf("HTTP %d", result.StatusCode)
 			errorDistribution[errorMsg]++
-			fmt.Printf("⚠️  Request %d: %d - %v\n", i+1, result.StatusCode, result.Duration)
+			fmt.Printf("Request %d: %d - %v\n", i+1, result.StatusCode, result.Duration)
 		}
 	}
 
@@ -57,13 +57,13 @@ func (b *BenchmarkRunner) RunSequentialBenchmark(execInfo *types.APIExecutionInf
 
 // RunConcurrentBenchmark runs benchmark with concurrent connections
 func (b *BenchmarkRunner) RunConcurrentBenchmark(execInfo *types.APIExecutionInfo, concurrency int, duration time.Duration, rateLimit int) (*types.BenchmarkResult, error) {
-	fmt.Printf("🚀 Starting concurrent benchmark:\n")
-	fmt.Printf("📍 Target: %s\n", execInfo.DiscoveredURL+execInfo.Path)
-	fmt.Printf("🔧 Method: %s\n", execInfo.Method)
-	fmt.Printf("🧵 Concurrency: %d\n", concurrency)
-	fmt.Printf("⏱️  Duration: %v\n", duration)
+	fmt.Printf("Starting concurrent benchmark:\n")
+	fmt.Printf("Target: %s\n", execInfo.DiscoveredURL+execInfo.Path)
+	fmt.Printf("Method: %s\n", execInfo.Method)
+	fmt.Printf("Concurrency: %d\n", concurrency)
+	fmt.Printf("Duration: %v\n", duration)
 	if rateLimit > 0 {
-		fmt.Printf("🚦 Rate Limit: %d req/sec\n", rateLimit)
+		fmt.Printf("Rate Limit: %d req/sec\n", rateLimit)
 	}
 	fmt.Println()
 
@@ -180,7 +180,7 @@ func (b *BenchmarkRunner) collectConcurrentResults(results <-chan *RequestResult
 		if totalRequests%100 == 0 {
 			elapsed := time.Since(startTime)
 			rps := float64(totalRequests) / elapsed.Seconds()
-			fmt.Printf("📊 Progress: %d requests, %.1f req/sec\n", totalRequests, rps)
+			fmt.Printf("Progress: %d requests, %.1f req/sec\n", totalRequests, rps)
 		}
 	}
 

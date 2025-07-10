@@ -33,7 +33,7 @@ type UEAuth struct {
 
 // CalculateResStar - Calculate free5gc resStar vector (XRES*)
 func (u *UEAuth) CalculateResStar() error {
-	fmt.Printf("🔐 ========== FREE5GC RESSTAR CALCULATION ==========\n")
+	fmt.Printf("========== FREE5GC RESSTAR CALCULATION ==========\n")
 
 	// Validate input parameters
 	if len(u.K) != 16 || len(u.OPc) != 16 || len(u.RAND) != 16 || len(u.AUTN) != 16 {
@@ -101,7 +101,7 @@ func (u *UEAuth) CalculateResStar() error {
 
 	u.HResStar = u.deriveHResStar()
 
-	fmt.Printf("\n🔐 ========== CALCULATION COMPLETE ==========\n")
+	fmt.Printf("========== CALCULATION COMPLETE ==========\n")
 	return nil
 }
 
