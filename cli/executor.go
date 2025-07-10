@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -242,7 +241,6 @@ func (e *APIExecutor) RunBenchmark(execInfo *types.APIExecutionInfo, iterations 
 			errorType := fmt.Sprintf("Error: %v", err)
 			errorDistribution[errorType]++
 			fmt.Printf("Request %d failed: %v\n", requestCount, err)
-			os.Exit(1)
 		} else {
 			successCount++
 			fmt.Printf("Request %d completed in %v\n", requestCount, execDuration)
