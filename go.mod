@@ -15,5 +15,3 @@ require (
 	github.com/tidwall/pretty v1.2.0 // indirect
 	golang.org/x/text v0.26.0 // indirect
 )
-
-replace github.com/devuk0204/ctrlbench => ./

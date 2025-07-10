@@ -347,11 +347,6 @@ func (rb *RequestBuilder) executePrerequisiteAPI(chainConfig *types.APIChainConf
 			return nil, fmt.Errorf("failed to discover prerequisite NF URL: %w", err)
 		}
 	}
-	// For Debug: replace discovered URL with a specific IP if needed
-	if discoveredURL == "http://controlplane-free5gc-ausf-service:80" {
-		discoveredURL = "http://10.96.43.148:80"
-		fmt.Printf("Replaced AUSF service URL with IP: %s\n", discoveredURL)
-	}
 	// Setup execution info
 	prereqExecInfo.DiscoveredURL = discoveredURL
 	rb.PopulateHeaders(prereqExecInfo, prereqNF, config)
