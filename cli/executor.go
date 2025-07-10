@@ -84,11 +84,6 @@ func (e *APIExecutor) ExecuteAPI(targetNF, apiName string) (*types.APIExecutionI
 			return nil, fmt.Errorf("NF discovery failed: %w", err)
 		}
 
-		// For testing purposes, replace discovered URL
-		if discoveredURL == "http://controlplane-free5gc-ausf-service:80" {
-			discoveredURL = "http://10.96.43.148:80"
-		}
-
 		fmt.Printf("Discovered %s URL: %s\n", targetNF, discoveredURL)
 	}
 
