@@ -8,6 +8,7 @@ type ConfigurationFile struct {
 type UserInputSection struct {
 	GlobalSettings           map[string]interface{}            `yaml:"global_settings"`
 	NFSettings               map[string]map[string]interface{} `yaml:"nf_settings"`
+	UeCredentials            map[string]interface{}            `yaml:"ue_credentials"`
 	CommonParameters         map[string]interface{}            `yaml:"common_parameters"`
 	CommonRequestBodies      map[string]interface{}            `yaml:"common_request_bodies"`
 	APISpecificParameters    map[string]interface{}            `yaml:"api_specific_parameters"`

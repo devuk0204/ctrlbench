@@ -155,6 +155,7 @@ func buildUserInputSection(nfServices map[string][]types.ServiceMetadata) types.
 	userInputs := types.UserInputSection{
 		GlobalSettings:           buildGlobalSettingsSection(),
 		NFSettings:               buildNFSettingsSection(nfServices),
+		UeCredentials:            buildUeCrendentialsSection(),
 		CommonParameters:         buildCommonParametersSection(nfServices),
 		CommonRequestBodies:      buildCommonRequestBodiesSection(nfServices),
 		APISpecificParameters:    buildAPISpecificParametersSection(nfServices),
@@ -227,6 +228,35 @@ func buildNFSettingsSection(nfServices map[string][]types.ServiceMetadata) map[s
 	}
 
 	return nfSettings
+}
+
+// buildUeCrendentialsSection - Build UE credentials section
+func buildUeCrendentialsSection() map[string]interface{} {
+	return map[string]interface{}{
+		"ue_credentials": map[string]interface{}{
+			"k": map[string]interface{}{
+				"description": "UE secret key (K) for 5G-AKA authentication (128-bit hex string)",
+				"example":     "8baf473f2f8fd09487cccbd7097c6862",
+				"required":    true,
+				"type":        "string",
+				"value":       "8baf473f2f8fd09487cccbd7097c6862",
+			},
+			"opc": map[string]interface{}{
+				"description": "Operator variant algorithm configuration field (OPc) (128-bit hex string)",
+				"example":     "8e27b6af0e692e750f32667a3b14605d",
+				"required":    true,
+				"type":        "string",
+				"value":       "8e27b6af0e692e750f32667a3b14605d",
+			},
+			"op_type": map[string]interface{}{
+				"description": "Operator code type - either 'OP' or 'OPC'",
+				"example":     "OPC",
+				"required":    true,
+				"type":        "string",
+				"value":       "OPC",
+			},
+		},
+	}
 }
 
 // buildCommonParametersSection - Build common parameters in user-friendly format
@@ -1014,6 +1044,13 @@ user_inputs:
 	file.WriteString("# =============================================================================\n")
 	file.WriteString("  nf_settings:\n")
 	writeYAMLSection(file, config.UserInputs.NFSettings, 4)
+
+	// Write UE credentials separator and section
+	file.WriteString("\n# =============================================================================\n")
+	file.WriteString("# UE CREDENTIALS - 5G-AKA Authentication Parameters\n")
+	file.WriteString("# =============================================================================\n")
+	file.WriteString("  ue_credentials:\n")
+	writeYAMLSection(file, config.UserInputs.UeCredentials, 4)
 
 	// Write common parameters separator and section
 	file.WriteString("\n# =============================================================================\n")
