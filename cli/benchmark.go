@@ -33,7 +33,8 @@ func (b *BenchmarkRunner) RunSequentialBenchmark(execInfo *types.APIExecutionInf
 	errorDistribution := make(map[string]int)
 
 	for i := 0; i < iterations; i++ {
-		result := b.httpClient.ExecuteWithResult(execInfo, 0)
+		// execInfo는 이미 완전히 세팅된 상태여야 함
+		result := b.httpClient.ExecuteWithResult(execInfo, i+1)
 		durations = append(durations, result.Duration)
 
 		if result.Error != nil {
