@@ -8,8 +8,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/free5gc/milenage"
+	"github.com/free5gc/util/ueauth"
 )
 
 type UEAuth struct {
@@ -29,41 +31,6 @@ type UEAuth struct {
 	HResStar []byte // HXRES* - free5gc uses this name
 }
 
-// hmacSHA256 computes HMAC-SHA256(key, data).
-func hmacSHA256(key, data []byte) []byte {
-	mac := hmac.New(sha256.New, key)
-	mac.Write(data)
-	return mac.Sum(nil)
-}
-
-// kdf implements 3GPP TS 33.501 Annex A.1 KDF with proper parameter encoding
-func kdf(K []byte, FC byte, params [][]byte) []byte {
-	fmt.Printf("🔐     KDF DEBUG:\n")
-	fmt.Printf("🔐       Key: %s (len=%d)\n", hex.EncodeToString(K), len(K))
-	fmt.Printf("🔐       FC:  0x%02X\n", FC)
-
-	buf := []byte{FC}
-
-	for i, P := range params {
-		fmt.Printf("🔐       P%d:  %s (len=%d)\n", i, hex.EncodeToString(P), len(P))
-		buf = append(buf, P...)
-
-		// Length field: 2 bytes, big endian, length in bits
-		lengthInBits := uint16(len(P) * 8)
-		L := make([]byte, 2)
-		binary.BigEndian.PutUint16(L, lengthInBits)
-		buf = append(buf, L...)
-		fmt.Printf("🔐       L%d:  %s (len_bits=%d)\n", i, hex.EncodeToString(L), lengthInBits)
-	}
-
-	fmt.Printf("🔐       Full input: %s (len=%d)\n", hex.EncodeToString(buf), len(buf))
-
-	result := hmacSHA256(K, buf)
-	fmt.Printf("🔐       KDF Output: %s (len=%d)\n", hex.EncodeToString(result), len(result))
-
-	return result
-}
-
 // CalculateResStar - Calculate free5gc resStar vector (XRES*)
 func (u *UEAuth) CalculateResStar() error {
 	fmt.Printf("🔐 ========== FREE5GC RESSTAR CALCULATION ==========\n")
@@ -73,10 +40,6 @@ func (u *UEAuth) CalculateResStar() error {
 		return errors.New("invalid input parameter lengths")
 	}
 
-	// STEP 1: Milenage computation
-	fmt.Printf("🔐 STEP 1: Milenage computation...\n")
-
-	// Convert to uint8 arrays as required by milenage package
 	var opcArray, kArray, randArray [16]uint8
 	copy(opcArray[:], u.OPc)
 	copy(kArray[:], u.K)
@@ -85,12 +48,7 @@ func (u *UEAuth) CalculateResStar() error {
 	// Extract SQN and AMF from AUTN
 	sqnXorAK := u.AUTN[0:6]
 	amfBytes := u.AUTN[6:8]
-	amf := binary.BigEndian.Uint16(amfBytes)
-
-	fmt.Printf("🔐   OPc: %s\n", hex.EncodeToString(u.OPc))
-	fmt.Printf("🔐   K:   %s\n", hex.EncodeToString(u.K))
-	fmt.Printf("🔐   RAND: %s\n", hex.EncodeToString(u.RAND))
-	fmt.Printf("🔐   AMF: 0x%04X\n", amf)
+	// amf := binary.BigEndian.Uint16(amfBytes)
 
 	// Compute Milenage functions
 	var res [8]uint8
@@ -114,377 +72,223 @@ func (u *UEAuth) CalculateResStar() error {
 	copy(u.IK, ik[:])
 	copy(u.AK, ak[:])
 
-	fmt.Printf("🔐 Milenage Results:\n")
-	fmt.Printf("🔐   RES: %s\n", hex.EncodeToString(u.RES))
-	fmt.Printf("🔐   CK:  %s\n", hex.EncodeToString(u.CK))
-	fmt.Printf("🔐   IK:  %s\n", hex.EncodeToString(u.IK))
-	fmt.Printf("🔐   AK:  %s\n", hex.EncodeToString(u.AK))
-
-	// Extract SQN
 	sqnBytes := make([]byte, 6)
 	for i := 0; i < 6; i++ {
 		sqnBytes[i] = sqnXorAK[i] ^ u.AK[i]
 	}
-	fmt.Printf("🔐   SQN: %s\n", hex.EncodeToString(sqnBytes))
 
-	// STEP 2: KAUSF derivation (3GPP TS 33.501 Annex A.2)
-	// KAUSF = KDF(CK||IK, FC=0x6A, SQN⊕AK, ServingNetworkName)
-	fmt.Printf("🔐 STEP 2: KAUSF derivation...\n")
-	ckik := make([]byte, 32)
-	copy(ckik, u.CK)
-	copy(ckik[16:], u.IK)
+	var macA [8]uint8
+	var macS [8]uint8
+	err = milenage.F1(opcArray[:], kArray[:], randArray[:], sqnBytes, amfBytes, macA[:], macS[:])
+	if err != nil {
+		return fmt.Errorf("milenage F1 failed: %w", err)
+	}
 
-	servingNameBytes := []byte(u.ServingName)
+	receivedMAC := u.AUTN[8:16]
+	if !bytes.Equal(macA[:], receivedMAC) {
+		return fmt.Errorf("MAC verification failed")
+	}
 
-	fmt.Printf("🔐   CK||IK: %s (len=%d)\n", hex.EncodeToString(ckik), len(ckik))
-	fmt.Printf("🔐   SQN⊕AK: %s (len=%d)\n", hex.EncodeToString(sqnXorAK), len(sqnXorAK))
-	fmt.Printf("🔐   ServingName: '%s' -> %s (len=%d)\n", u.ServingName, hex.EncodeToString(servingNameBytes), len(servingNameBytes))
+	u.KAUSF, err = u.deriveKAUSFFree5GC(sqnBytes)
+	if err != nil {
+		return fmt.Errorf("KAUSF derivation failed: %w", err)
+	}
 
-	// According to 3GPP TS 33.501 A.2: P0 = SQN⊕AK, P1 = serving network name
-	kausfFull := kdf(ckik, 0x6A, [][]byte{sqnXorAK, servingNameBytes})
-	u.KAUSF = kausfFull[:32] // Take first 32 bytes (256 bits)
-	fmt.Printf("🔐   KAUSF (32 bytes): %s\n", hex.EncodeToString(u.KAUSF))
+	u.ResStar, err = u.deriveResStarFree5GC()
+	if err != nil {
+		return fmt.Errorf("RES* derivation failed: %w", err)
+	}
 
-	// STEP 3: RES* (XRES*) derivation (3GPP TS 33.501 Annex A.4)
-	fmt.Printf("🔐 STEP 3: RES* (XRES*) derivation...\n")
+	u.HResStar = u.deriveHResStar()
 
-	// Based on 3GPP TS 33.501 A.4 and UERANSIM working with free5gc,
-	// the correct parameter order is: ServingName, RAND, RES
-	fmt.Printf("🔐   CK||IK: %s\n", hex.EncodeToString(ckik))
-	fmt.Printf("🔐   ServingName: '%s' -> %s\n", u.ServingName, hex.EncodeToString(servingNameBytes))
-	fmt.Printf("🔐   RAND: %s (len=%d)\n", hex.EncodeToString(u.RAND), len(u.RAND))
-	fmt.Printf("🔐   RES: %s (len=%d)\n", hex.EncodeToString(u.RES), len(u.RES))
-
-	// Use the standard 3GPP order: ServingName, RAND, RES
-	fmt.Printf("🔐   Using parameter order: ServingName, RAND, RES (3GPP TS 33.501)\n")
-	resStarFull := kdf(ckik, 0x6B, [][]byte{servingNameBytes, u.RAND, u.RES})
-	u.ResStar = resStarFull[:16] // Take first 16 bytes (128 bits) as per spec
-	fmt.Printf("🔐   RES* (16 bytes): %s\n", hex.EncodeToString(u.ResStar))
-
-	// STEP 4: HRES* (HXRES*) computation
-	// HRES* = SHA256(RAND || RES*)[0:16] (MSB 128 bits)
-	fmt.Printf("🔐 STEP 4: HRES* (HXRES*) computation...\n")
-	randResStar := make([]byte, len(u.RAND)+len(u.ResStar))
-	copy(randResStar, u.RAND)
-	copy(randResStar[len(u.RAND):], u.ResStar)
-
-	fmt.Printf("🔐   RAND||RES*: %s (len=%d)\n", hex.EncodeToString(randResStar), len(randResStar))
-
-	h := sha256.New()
-	h.Write(randResStar)
-	sha256Full := h.Sum(nil)
-
-	fmt.Printf("🔐   SHA256 full: %s (len=%d)\n", hex.EncodeToString(sha256Full), len(sha256Full))
-
-	// Take MSB 128 bits for HRES*
-	u.HResStar = sha256Full[:16]
-	fmt.Printf("🔐   HRES* (MSB128): %s\n", hex.EncodeToString(u.HResStar))
-
-	fmt.Printf("🔐 ========== RESSTAR COMPUTATION COMPLETE ==========\n")
-	fmt.Printf("🔐 FREE5GC RESSTAR VECTOR:\n")
-	fmt.Printf("🔐   RES*:  %s\n", hex.EncodeToString(u.ResStar))
-	fmt.Printf("🔐   HRES*: %s\n", hex.EncodeToString(u.HResStar))
-	fmt.Printf("🔐 ================================================\n")
-
+	fmt.Printf("\n🔐 ========== CALCULATION COMPLETE ==========\n")
 	return nil
 }
 
-// GetResStarVector returns the calculated RES* vector
-func (u *UEAuth) GetResStarVector() ([]byte, error) {
-	if u.ResStar == nil {
-		return nil, errors.New("RES* not calculated; run CalculateResStar first")
-	}
-	return u.ResStar, nil
-}
+// deriveKAUSFFree5GC - Derive KAUSF using free5gc's GetKDFValue
+func (u *UEAuth) deriveKAUSFFree5GC(sqn []byte) ([]byte, error) {
+	// Key = CK || IK
+	key := append(u.CK, u.IK...)
 
-// GetHResStarVector returns the calculated HRES* vector
-func (u *UEAuth) GetHResStarVector() ([]byte, error) {
-	if u.HResStar == nil {
-		return nil, errors.New("HRES* not calculated; run CalculateResStar first")
-	}
-	return u.HResStar, nil
-}
+	// P0 = Serving Network Name
+	p0 := []byte(u.ServingName)
 
-// ValidateResStar compares computed RES* against expected value
-func (u *UEAuth) ValidateResStar(expectedResStar string) (bool, error) {
-	if u.ResStar == nil {
-		return false, errors.New("RES* not computed; run CalculateResStar first")
+	// P1 = SQN ⊕ AK
+	sqnXorAK := make([]byte, 6)
+	for i := 0; i < 6; i++ {
+		sqnXorAK[i] = sqn[i] ^ u.AK[i]
 	}
 
-	expectedBytes, err := hex.DecodeString(expectedResStar)
+	// Use free5gc's GetKDFValue function
+	// FC = "6A" for KAUSF derivation
+	kausf, err := ueauth.GetKDFValue(key, ueauth.FC_FOR_KAUSF_DERIVATION, p0, sqnXorAK)
 	if err != nil {
-		return false, fmt.Errorf("failed to decode expected RES*: %w", err)
+		return nil, fmt.Errorf("GetKDFValue for KAUSF failed: %w", err)
 	}
 
-	fmt.Printf("🔐 🔍 RES* validation:\n")
-	fmt.Printf("🔐   Computed: %s\n", hex.EncodeToString(u.ResStar))
-	fmt.Printf("🔐   Expected: %s\n", expectedResStar)
+	// KAUSF is 256 bits (32 bytes)
+	if len(kausf) < 32 {
+		return nil, fmt.Errorf("KAUSF length is less than 32 bytes: %d", len(kausf))
+	}
 
-	match := bytes.Equal(u.ResStar, expectedBytes)
-	if match {
-		fmt.Printf("🔐 ✅ RES* validation SUCCESS!\n")
+	return kausf[:32], nil
+}
+
+func (u *UEAuth) deriveResStarFree5GC() ([]byte, error) {
+	// 1) 올바른 키: CK || IK
+	key := append(u.CK, u.IK...)
+
+	// 2) 파라미터 준비
+	p0 := []byte(u.ServingName) // P0 = ServingNetworkName
+	p1 := u.RAND                // P1 = RAND
+	p2 := u.RES                 // P2 = RES
+	l0 := ueauth.KDFLen(p0)     // L0
+	l1 := ueauth.KDFLen(p1)     // L1
+	l2 := ueauth.KDFLen(p2)     // L2
+
+	// 3) KDF 호출 (길이 필드 포함)
+	full, err := ueauth.GetKDFValue(
+		key,
+		ueauth.FC_FOR_RES_STAR_XRES_STAR_DERIVATION,
+		p0, l0,
+		p1, l1,
+		p2, l2,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("GetKDFValue for RES* failed: %w", err)
+	}
+
+	// 4) 마지막 16바이트를 resStar로 사용
+	if len(full) < 16 {
+		return nil, fmt.Errorf("RES* length < 16: %d", len(full))
+	}
+	return full[len(full)-16:], nil
+}
+
+// deriveHResStar - Derive HRES* (HXRES*) according to 3GPP TS 33.501
+func (u *UEAuth) deriveHResStar() []byte {
+	// HRES* = SHA-256(RAND || RES*)[128 least significant bits]
+	h := sha256.New()
+	h.Write(u.RAND)
+	h.Write(u.ResStar)
+	hash := h.Sum(nil)
+
+	// Take the least significant 128 bits (last 16 bytes)
+	return hash[len(hash)-16:]
+}
+
+// CalculateResStarWrapper - Wrapper function to match your existing code
+func CalculateResStar(opcStr, kStr string, rand, autn []byte, servingNetworkName string) (resStar, hresStar, ckPrime, ikPrime []byte, err error) {
+	// Decode OPc and K from hex strings
+	opc, err := hex.DecodeString(opcStr)
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("failed to decode OPc: %w", err)
+	}
+
+	k, err := hex.DecodeString(kStr)
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("failed to decode K: %w", err)
+	}
+
+	// Remove "5G:" prefix from serving network name if present
+	if idx := strings.Index(servingNetworkName, ":"); idx >= 0 {
+		servingNetworkName = servingNetworkName[idx+1:]
+	}
+
+	// Create UEAuth instance
+	ueAuth := &UEAuth{
+		K:           k,
+		OPc:         opc,
+		RAND:        rand,
+		AUTN:        autn,
+		ServingName: servingNetworkName,
+	}
+
+	// Calculate RES*
+	err = ueAuth.CalculateResStar()
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+
+	// For 5G, CK' and IK' are not directly used, instead KAUSF is used
+	// But if you need them for compatibility, we can derive them
+	ckPrime, ikPrime = deriveKeyPrimes(ueAuth.CK, ueAuth.IK, servingNetworkName, ueAuth.AK)
+
+	return ueAuth.ResStar, ueAuth.HResStar, ckPrime, ikPrime, nil
+}
+
+// deriveKeyPrimes - Derive CK' and IK' for compatibility (if needed)
+func deriveKeyPrimes(ck, ik []byte, servingNetworkName string, ak []byte) (ckPrime, ikPrime []byte) {
+	// This is an optional function if you need CK' and IK'
+	// In 5G, KAUSF is typically used instead
+
+	// For now, return the first 16 bytes of KAUSF as CK' and next 16 as IK'
+	// This is a simplified approach - adjust based on your needs
+	fc := byte(0x69) // Example FC for key derivation
+
+	var s bytes.Buffer
+	s.WriteByte(fc)
+	s.Write([]byte(servingNetworkName))
+
+	key := append(ck, ik...)
+	h := hmac.New(sha256.New, key)
+	h.Write(s.Bytes())
+	derived := h.Sum(nil)
+
+	ckPrime = derived[:16]
+	ikPrime = derived[16:32]
+
+	return ckPrime, ikPrime
+}
+
+// KDFLen - Helper function to calculate length for KDF parameters
+func KDFLen(p []byte) []byte {
+	length := make([]byte, 2)
+	binary.BigEndian.PutUint16(length, uint16(len(p)))
+	return length
+}
+
+// DebugCompareWithExpected - Compare our results with expected values
+func (u *UEAuth) DebugCompareWithExpected(expectedResStar, expectedHResStar string) {
+	fmt.Printf("\n🔐 ========== DEBUG COMPARISON ==========\n")
+
+	// The free5gc logs show hex-encoded strings, not double-encoded
+	// So we just compare directly
+	fmt.Printf("🔐 Expected RES*: %s\n", expectedResStar)
+	fmt.Printf("🔐 Our RES*:      %s\n", hex.EncodeToString(u.ResStar))
+
+	if expectedResStar == hex.EncodeToString(u.ResStar) {
+		fmt.Printf("🔐 ✅ RES* MATCHES!\n")
 	} else {
-		fmt.Printf("🔐 ❌ RES* validation FAILED!\n")
-	}
+		fmt.Printf("🔐 ❌ RES* MISMATCH\n")
 
-	return match, nil
-}
+		// Try to decode in case it's double-encoded
+		if decoded, err := hex.DecodeString(expectedResStar); err == nil {
+			decodedStr := string(decoded)
+			fmt.Printf("🔐 Expected RES* (decoded as ASCII): %s\n", decodedStr)
 
-// ValidateHResStar compares computed HRES* against expected value
-func (u *UEAuth) ValidateHResStar(expectedHResStar string) (bool, error) {
-	if u.HResStar == nil {
-		return false, errors.New("HRES* not computed; run CalculateResStar first")
-	}
-
-	expectedBytes, err := hex.DecodeString(expectedHResStar)
-	if err != nil {
-		return false, fmt.Errorf("failed to decode expected HRES*: %w", err)
-	}
-
-	fmt.Printf("🔐 🔍 HRES* validation:\n")
-	fmt.Printf("🔐   Computed: %s\n", hex.EncodeToString(u.HResStar))
-	fmt.Printf("🔐   Expected: %s\n", expectedHResStar)
-
-	match := bytes.Equal(u.HResStar, expectedBytes)
-	if match {
-		fmt.Printf("🔐 ✅ HRES* validation SUCCESS!\n")
-		return true, nil
-	}
-
-	fmt.Printf("🔐 ❌ MSB128 failed, trying LSB128...\n")
-
-	// Try LSB128 as fallback (some implementations use LSB)
-	randResStar := make([]byte, len(u.RAND)+len(u.ResStar))
-	copy(randResStar, u.RAND)
-	copy(randResStar[len(u.RAND):], u.ResStar)
-
-	h := sha256.New()
-	h.Write(randResStar)
-	full := h.Sum(nil)
-	lsbHResStar := full[16:] // LSB 128 bits
-
-	fmt.Printf("🔐   LSB128: %s\n", hex.EncodeToString(lsbHResStar))
-
-	if bytes.Equal(lsbHResStar, expectedBytes) {
-		fmt.Printf("🔐 ✅ LSB128 WORKS! Updating HRES*\n")
-		u.HResStar = lsbHResStar
-		return true, nil
-	}
-
-	fmt.Printf("🔐 ❌ Both MSB128 and LSB128 failed\n")
-	return false, nil
-}
-
-// CalculateResStarAlternative tries alternative parameter orders for RES* calculation
-func (u *UEAuth) CalculateResStarAlternative() error {
-	fmt.Printf("🔐 ========== ALTERNATIVE RESSTAR CALCULATION ==========\n")
-
-	// First perform the same Milenage computation
-	if err := u.performMilenage(); err != nil {
-		return err
-	}
-
-	// Calculate KAUSF the same way
-	ckik := make([]byte, 32)
-	copy(ckik, u.CK)
-	copy(ckik[16:], u.IK)
-
-	sqnXorAK := u.AUTN[0:6]
-	servingNameBytes := []byte(u.ServingName)
-
-	kausfFull := kdf(ckik, 0x6A, [][]byte{sqnXorAK, servingNameBytes})
-	u.KAUSF = kausfFull[:32]
-
-	// Try different parameter orders for RES*
-	fmt.Printf("🔐 Trying alternative parameter orders for RES*...\n")
-
-	// Alternative 1: RAND, ServingName, RES
-	fmt.Printf("🔐 Alternative 1: RAND, ServingName, RES\n")
-	resStarFull := kdf(ckik, 0x6B, [][]byte{u.RAND, servingNameBytes, u.RES})
-	resStar1 := resStarFull[:16]
-	fmt.Printf("🔐   RES* Alt1: %s\n", hex.EncodeToString(resStar1))
-
-	// Alternative 2: ServingName, RAND, RES (original spec order)
-	fmt.Printf("🔐 Alternative 2: ServingName, RAND, RES\n")
-	resStarFull = kdf(ckik, 0x6B, [][]byte{servingNameBytes, u.RAND, u.RES})
-	resStar2 := resStarFull[:16]
-	fmt.Printf("🔐   RES* Alt2: %s\n", hex.EncodeToString(resStar2))
-
-	// Alternative 3: RES, RAND, ServingName
-	fmt.Printf("🔐 Alternative 3: RES, RAND, ServingName\n")
-	resStarFull = kdf(ckik, 0x6B, [][]byte{u.RES, u.RAND, servingNameBytes})
-	resStar3 := resStarFull[:16]
-	fmt.Printf("🔐   RES* Alt3: %s\n", hex.EncodeToString(resStar3))
-
-	// Use Alternative 1 as default for this method
-	u.ResStar = resStar1
-
-	// Calculate HRES* the same way
-	randResStar := make([]byte, len(u.RAND)+len(u.ResStar))
-	copy(randResStar, u.RAND)
-	copy(randResStar[len(u.RAND):], u.ResStar)
-
-	h := sha256.New()
-	h.Write(randResStar)
-	sha256Full := h.Sum(nil)
-	u.HResStar = sha256Full[:16]
-
-	fmt.Printf("🔐 Using Alternative 1 result:\n")
-	fmt.Printf("🔐   RES*:  %s\n", hex.EncodeToString(u.ResStar))
-	fmt.Printf("🔐   HRES*: %s\n", hex.EncodeToString(u.HResStar))
-
-	return nil
-}
-
-// performMilenage is a helper to avoid code duplication
-func (u *UEAuth) performMilenage() error {
-	// Convert to uint8 arrays as required by milenage package
-	var opcArray, kArray, randArray [16]uint8
-	copy(opcArray[:], u.OPc)
-	copy(kArray[:], u.K)
-	copy(randArray[:], u.RAND)
-
-	// Compute Milenage functions
-	var res [8]uint8
-	var ck [16]uint8
-	var ik [16]uint8
-	var ak [6]uint8
-
-	err := milenage.F2345(opcArray[:], kArray[:], randArray[:], res[:], ck[:], ik[:], ak[:], nil)
-	if err != nil {
-		return fmt.Errorf("milenage F2345 failed: %w", err)
-	}
-
-	// Convert results to []byte
-	u.RES = make([]byte, 8)
-	u.CK = make([]byte, 16)
-	u.IK = make([]byte, 16)
-	u.AK = make([]byte, 6)
-
-	copy(u.RES, res[:])
-	copy(u.CK, ck[:])
-	copy(u.IK, ik[:])
-	copy(u.AK, ak[:])
-
-	return nil
-}
-
-// DebugCompareWithExpected helps debug RES* calculation issues
-func (u *UEAuth) DebugCompareWithExpected(expectedXresStar string) error {
-	fmt.Printf("🔐 ========== DEBUG COMPARISON ==========\n")
-
-	// Check if the expected value is double-encoded
-	fmt.Printf("🔐 Expected Xres* from AUSF (raw): %s (len=%d)\n", expectedXresStar, len(expectedXresStar))
-
-	// Decode the expected value
-	if decoded, err := hex.DecodeString(expectedXresStar); err == nil {
-		decodedStr := string(decoded)
-		fmt.Printf("🔐 Expected Xres* decoded as string: %s (len=%d)\n", decodedStr, len(decodedStr))
-
-		// Check if it's valid hex after first decode
-		if decodedBytes, err2 := hex.DecodeString(decodedStr); err2 == nil {
-			fmt.Printf("🔐 ⚠️  Expected value is double-encoded hex!\n")
-			fmt.Printf("🔐 Expected Xres* final value: %s (len=%d bytes)\n", decodedStr, len(decodedBytes))
-		} else {
-			fmt.Printf("🔐 Expected value is single-encoded: %x\n", decoded)
+			if decodedStr == hex.EncodeToString(u.ResStar) {
+				fmt.Printf("🔐 ✅ RES* MATCHES after decoding!\n")
+			}
 		}
 	}
 
-	// Try all calculation methods and compare
-	fmt.Printf("\n🔐 Trying all RES* calculation methods...\n")
+	fmt.Printf("\n🔐 Expected HRES*: %s\n", expectedHResStar)
+	fmt.Printf("🔐 Our HRES*:      %s\n", hex.EncodeToString(u.HResStar))
 
-	// Calculate using all methods
-	ckik := make([]byte, 32)
-	copy(ckik, u.CK)
-	copy(ckik[16:], u.IK)
-	servingNameBytes := []byte(u.ServingName)
+	if expectedHResStar == hex.EncodeToString(u.HResStar) {
+		fmt.Printf("🔐 ✅ HRES* MATCHES!\n")
+	} else {
+		fmt.Printf("🔐 ❌ HRES* MISMATCH\n")
 
-	// Method 1: ServingName, RES, RAND (from formal spec)
-	fmt.Printf("\n🔐 Method 1: ServingName, RES, RAND\n")
-	resStarFull := kdf(ckik, 0x6B, [][]byte{servingNameBytes, u.RES, u.RAND})
-	resStar1 := resStarFull[:16]
-	fmt.Printf("🔐   RES*: %s\n", hex.EncodeToString(resStar1))
-	u.checkMatch(resStar1, expectedXresStar)
+		// Try to decode in case it's double-encoded
+		if decoded, err := hex.DecodeString(expectedHResStar); err == nil {
+			decodedStr := string(decoded)
+			fmt.Printf("🔐 Expected HRES* (decoded as ASCII): %s\n", decodedStr)
 
-	// Method 2: ServingName, RAND, RES (original in code)
-	fmt.Printf("\n🔐 Method 2: ServingName, RAND, RES\n")
-	resStarFull = kdf(ckik, 0x6B, [][]byte{servingNameBytes, u.RAND, u.RES})
-	resStar2 := resStarFull[:16]
-	fmt.Printf("🔐   RES*: %s\n", hex.EncodeToString(resStar2))
-	u.checkMatch(resStar2, expectedXresStar)
-
-	// Method 3: RAND, ServingName, RES
-	fmt.Printf("\n🔐 Method 3: RAND, ServingName, RES\n")
-	resStarFull = kdf(ckik, 0x6B, [][]byte{u.RAND, servingNameBytes, u.RES})
-	resStar3 := resStarFull[:16]
-	fmt.Printf("🔐   RES*: %s\n", hex.EncodeToString(resStar3))
-	u.checkMatch(resStar3, expectedXresStar)
-
-	// Method 4: RES, RAND, ServingName
-	fmt.Printf("\n🔐 Method 4: RES, RAND, ServingName\n")
-	resStarFull = kdf(ckik, 0x6B, [][]byte{u.RES, u.RAND, servingNameBytes})
-	resStar4 := resStarFull[:16]
-	fmt.Printf("🔐   RES*: %s\n", hex.EncodeToString(resStar4))
-	u.checkMatch(resStar4, expectedXresStar)
-
-	// Method 5: RES, ServingName, RAND
-	fmt.Printf("\n🔐 Method 5: RES, ServingName, RAND\n")
-	resStarFull = kdf(ckik, 0x6B, [][]byte{u.RES, servingNameBytes, u.RAND})
-	resStar5 := resStarFull[:16]
-	fmt.Printf("🔐   RES*: %s\n", hex.EncodeToString(resStar5))
-	u.checkMatch(resStar5, expectedXresStar)
-
-	// Method 6: RAND, RES, ServingName
-	fmt.Printf("\n🔐 Method 6: RAND, RES, ServingName\n")
-	resStarFull = kdf(ckik, 0x6B, [][]byte{u.RAND, u.RES, servingNameBytes})
-	resStar6 := resStarFull[:16]
-	fmt.Printf("🔐   RES*: %s\n", hex.EncodeToString(resStar6))
-	u.checkMatch(resStar6, expectedXresStar)
-
-	return nil
-}
-
-// checkMatch is a helper to check if calculated RES* matches expected
-func (u *UEAuth) checkMatch(resStar []byte, expectedXresStar string) {
-	// Direct comparison
-	if hex.EncodeToString(resStar) == expectedXresStar {
-		fmt.Printf("🔐   ✅ DIRECT MATCH!\n")
-		return
-	}
-
-	// Double-encoded comparison
-	hexOfHex := hex.EncodeToString([]byte(hex.EncodeToString(resStar)))
-	if hexOfHex == expectedXresStar {
-		fmt.Printf("🔐   ✅ MATCH with double-encoding!\n")
-		return
-	}
-
-	// Check if expected is double-encoded and compare with decoded
-	if decoded, err := hex.DecodeString(expectedXresStar); err == nil {
-		decodedStr := string(decoded)
-		if hex.EncodeToString(resStar) == decodedStr {
-			fmt.Printf("🔐   ✅ MATCH after decoding expected value!\n")
-			return
+			if decodedStr == hex.EncodeToString(u.HResStar) {
+				fmt.Printf("🔐 ✅ HRES* MATCHES after decoding!\n")
+			}
 		}
 	}
-
-	fmt.Printf("🔐   ❌ No match\n")
-}
-
-// Legacy method names for backward compatibility
-func (u *UEAuth) PerformUEAuth() error {
-	return u.CalculateResStar()
-}
-
-func (u *UEAuth) PerformUEAuthAlternative() error {
-	return u.CalculateResStarAlternative()
-}
-
-// Legacy getters for backward compatibility
-func (u *UEAuth) GetXRESStar() []byte {
-	return u.ResStar
-}
-
-func (u *UEAuth) GetHXRESStar() []byte {
-	return u.HResStar
 }

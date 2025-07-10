@@ -1,6 +1,8 @@
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/free5gc/milenage v1.0.0 h1:OMSdAuJpOW71REje4iahCVt0sBJa5FNmJK+iDQtYJzo=
 github.com/free5gc/milenage v1.0.0/go.mod h1:QJYEh/7FTg2AXCo80BOrdwbAvm3q8OpVckR3SjwTvw8=
+github.com/free5gc/util v1.0.7 h1:HGlLR/QT4i6o3i4bL5M3SQg6Bc7WdN3cN9VdcnEeQu8=
+github.com/free5gc/util v1.0.7/go.mod h1:a14oUpiGqSkyngEhDvHshxdwKWFP65iVAahkzsISIQE=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
 github.com/stretchr/testify v1.6.1/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=

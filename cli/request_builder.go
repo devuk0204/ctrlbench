@@ -352,7 +352,7 @@ func (rb *RequestBuilder) executePrerequisiteAPI(chainConfig *types.APIChainConf
 		strings.Contains(strings.ToLower(chainConfig.PrerequisiteAPI), "authentication") {
 		fmt.Printf("🔐 Detected PostUeAuthentications - computing resStar\n")
 
-		resStar, err := rb.computeResStar(result.ResponseBody, config)
+		resStar, err := rb.computeResStar(string(result.ResponseBody), config)
 		if err != nil {
 			fmt.Printf("❌ Failed to compute resStar: %v\n", err)
 		} else {
@@ -602,16 +602,8 @@ func (rb *RequestBuilder) computeResStar(responseBody string, config map[string]
 
 	randStr, _ := authData["rand"].(string)
 	autnStr, _ := authData["autn"].(string)
-	hxresStarStr, _ := authData["hxresStar"].(string)
 	servingNetworkName, _ := authResponse["servingNetworkName"].(string)
 
-	fmt.Printf("🔐 Extracted from PostUeAuthentications response:\n")
-	fmt.Printf("   RAND: %s\n", randStr)
-	fmt.Printf("   AUTN: %s\n", autnStr)
-	fmt.Printf("   HXRES*: %s\n", hxresStarStr)
-	fmt.Printf("   ServingNetworkName: %s\n", servingNetworkName)
-
-	// Convert hex strings to bytes
 	rand, err := hex.DecodeString(randStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode RAND: %w", err)
@@ -648,12 +640,11 @@ func (rb *RequestBuilder) computeResStar(responseBody string, config map[string]
 		ServingName: servingNetworkName,
 	}
 
-	if err := ueAuth.PerformUEAuth(); err != nil {
+	if err := ueAuth.CalculateResStar(); err != nil {
 		return nil, fmt.Errorf("failed to perform UE authentication: %w", err)
 	}
 
 	fmt.Printf("🔐 Computed XRES* (resStar): %s\n", hex.EncodeToString(ueAuth.ResStar))
-	ueAuth.DebugCompareWithExpected(hxresStarStr)
 
 	return ueAuth.ResStar, nil
 }
