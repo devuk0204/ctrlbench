@@ -293,6 +293,29 @@ func (e *APIExecutor) RunConcurrentBenchmark(execInfo *types.APIExecutionInfo, c
 	userInputs := config["user_inputs"].(map[string]interface{})
 	globalSettings := userInputs["global_settings"].(map[string]interface{})
 
+	// Pre-discovery and setup before workers start
+	if execInfo.DiscoveredURL == "" {
+		var discoveredURL string
+		if strings.ToUpper(execInfo.NF) == "NRF" {
+			nrfURL, ok := GetConfigString(globalSettings["nrf_url"])
+			if !ok || nrfURL == "" {
+				return nil, fmt.Errorf("NRF URL missing")
+			}
+			discoveredURL = nrfURL
+		} else {
+			discoveredURL, err = e.discoverNFURL(globalSettings, execInfo.NF)
+			if err != nil {
+				return nil, fmt.Errorf("discovery failed: %w", err)
+			}
+			fmt.Printf("Discovered %s URL: %s\n", execInfo.NF, discoveredURL)
+		}
+		execInfo.DiscoveredURL = discoveredURL
+	}
+
+	// Pre-populate headers and final URL
+	e.requestBuilder.PopulateHeaders(execInfo, execInfo.NF, config)
+	execInfo.FinalURL = e.requestBuilder.BuildFinalURL(execInfo)
+
 	for key, value := range execInfo.Headers {
 		fmt.Printf("Header[%s] = %s\n", key, value)
 	}
@@ -316,12 +339,6 @@ func (e *APIExecutor) RunConcurrentBenchmark(execInfo *types.APIExecutionInfo, c
 	results := make(chan *RequestResult, concurrency*100)
 	var wg sync.WaitGroup
 
-	// Rate limiter
-	var rateLimiter <-chan time.Time
-	if rateLimit > 0 {
-		rateLimiter = time.Tick(time.Second / time.Duration(rateLimit))
-	}
-
 	// Start and end time
 	benchmarkStartTime := time.Now()
 	var endTime time.Time
@@ -329,6 +346,40 @@ func (e *APIExecutor) RunConcurrentBenchmark(execInfo *types.APIExecutionInfo, c
 		endTime = benchmarkStartTime.Add(duration)
 	} else {
 		endTime = benchmarkStartTime.Add(time.Hour)
+	}
+
+	// Rate limiter setup
+	var requestChan chan struct{}
+
+	if rateLimit > 0 {
+		// Create a channel to distribute requests
+		requestChan = make(chan struct{}, concurrency*2) // Buffer for smooth operation
+
+		// Send first token immediately
+		requestChan <- struct{}{}
+
+		// Start rate limiter that produces tokens at the specified rate
+		go func() {
+			ticker := time.NewTicker(time.Second / time.Duration(rateLimit))
+			defer ticker.Stop()
+
+			for {
+				<-ticker.C
+
+				if time.Now().After(endTime) {
+					close(requestChan)
+					return
+				}
+
+				// Try to send token, skip if channel full
+				select {
+				case requestChan <- struct{}{}:
+					// Token sent
+				default:
+					// Channel full, skip this token
+				}
+			}
+		}()
 	}
 
 	// Worker pool
@@ -346,62 +397,34 @@ func (e *APIExecutor) RunConcurrentBenchmark(execInfo *types.APIExecutionInfo, c
 				},
 			}
 
+			requestCount := 0
 			for time.Now().Before(endTime) {
-				if rateLimiter != nil {
-					<-rateLimiter
-				}
-
-				currentExecInfo := execInfo
-
-				// Setup URL and headers for current request
-				var discoveredURL string
-				if strings.ToUpper(execInfo.NF) == "NRF" {
-					nrfURL, ok := GetConfigString(globalSettings["nrf_url"])
-					if !ok || nrfURL == "" {
-						results <- &RequestResult{
-							Duration:     0,
-							StatusCode:   0,
-							Error:        fmt.Errorf("NRF URL missing"),
-							WorkerID:     workerID,
-							Timestamp:    time.Now(),
-							ResponseBody: "",
-						}
-						continue
-					}
-					discoveredURL = nrfURL
-				} else {
-					discoveredURL, err = e.discoverNFURL(globalSettings, execInfo.NF)
-					if err != nil {
-						results <- &RequestResult{
-							Duration:     0,
-							StatusCode:   0,
-							Error:        fmt.Errorf("discovery failed: %w", err),
-							WorkerID:     workerID,
-							Timestamp:    time.Now(),
-							ResponseBody: "",
-						}
-						continue
+				// Rate limiting if enabled
+				if requestChan != nil {
+					_, ok := <-requestChan
+					if !ok {
+						// Channel closed, exit
+						break
 					}
 				}
-
-				currentExecInfo.DiscoveredURL = discoveredURL
-				e.requestBuilder.PopulateHeaders(currentExecInfo, execInfo.NF, config)
-				currentExecInfo.FinalURL = e.requestBuilder.BuildFinalURL(currentExecInfo)
 
 				// Execute request
-				result := e.executeRequestWithClient(currentExecInfo, client, workerID)
+				result := e.executeRequestWithClient(execInfo, client, workerID)
 				results <- result
+				requestCount++
 
 				if time.Now().After(endTime) {
 					break
 				}
 
 				if result.Error != nil {
-					fmt.Printf("Worker %d: %v\n", result.WorkerID, result.Error)
+					fmt.Printf("Worker %d (req %d): %v\n", result.WorkerID, requestCount, result.Error)
 				} else {
-					fmt.Printf("Worker %d: %d (%v)\n", result.WorkerID, result.StatusCode, result.Duration)
+					fmt.Printf("Worker %d (req %d): %d (%v)\n", result.WorkerID, requestCount, result.StatusCode, result.Duration)
 				}
 			}
+
+			fmt.Printf("Worker %d completed %d requests\n", workerID, requestCount)
 		}(i)
 	}
 
