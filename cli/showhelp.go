@@ -9,7 +9,7 @@ import (
 
 // PrintUsage prints usage information
 func PrintUsage() {
-	fmt.Println("💡 Usage:")
+	fmt.Println("Usage:")
 	fmt.Println("    ctrlbench -t NF_NAME -a API_NAME  [OPTIONS]")
 	fmt.Println("    ctrlbench -h              # Show usage only")
 	fmt.Println("    ctrlbench -h all          # Show all NFs and APIs")
@@ -19,34 +19,34 @@ func PrintUsage() {
 	fmt.Println("    ctrlbench -b \"NF1 NF2\"    # Build configuration file for multiple NFs")
 	fmt.Println()
 
-	fmt.Println("📊 Benchmark Options:")
+	fmt.Println("Benchmark Options:")
 	fmt.Println("    -i INT        Number of iterations (default: 1)")
 	fmt.Println("    -d INT        Duration in seconds (overrides iterations)")
 	fmt.Println("    -r INT        Rate limit (requests per second)")
 	fmt.Println("    -c INT        Concurrent connections (enables load testing)")
 	fmt.Println()
 
-	fmt.Println("📋 Sequential Benchmark Examples:")
+	fmt.Println("Sequential Benchmark Examples:")
 	fmt.Println("    ctrlbench -t AUSF -a PostUeAuthentications -i 10")
 	fmt.Println("    ctrlbench -t AUSF -a PostUeAuthentications -d 30")
 	fmt.Println("    ctrlbench -t AUSF -a PostUeAuthentications -d 30 -r 5")
 	fmt.Println("    ctrlbench -t UDM -a GetSubscriptionData -i 5 -r 2")
 	fmt.Println()
 
-	fmt.Println("🚀 Concurrent Load Testing Examples:")
+	fmt.Println("Concurrent Load Testing Examples:")
 	fmt.Println("    ctrlbench -t AUSF -a PostUeAuthentications -c 10 -d 30")
 	fmt.Println("    ctrlbench -t AUSF -a PostUeAuthentications -c 5 -d 60 -r 10")
 	fmt.Println("    ctrlbench -t UDM -a GetSubscriptionData -c 20 -d 120")
 	fmt.Println()
 
-	fmt.Println("🔧 Configuration Build Examples:")
+	fmt.Println("Configuration Build Examples:")
 	fmt.Println("    ctrlbench -b              # Build for all NFs")
 	fmt.Println("    ctrlbench -b AUSF         # Build for AUSF only")
 	fmt.Println("    ctrlbench -b \"AUSF NRF\"   # Build for AUSF and NRF")
 	fmt.Println("    ctrlbench -b \"ausf udm amf\"  # Build for multiple NFs (case insensitive)")
 	fmt.Println()
 
-	fmt.Println("📝 Notes:")
+	fmt.Println("Notes:")
 	fmt.Println("    • Build configuration file first using -b option before executing APIs")
 	fmt.Println("    • Configure NRF URL in configuration.yaml")
 	fmt.Println("    • Use -c option for concurrent load testing")
