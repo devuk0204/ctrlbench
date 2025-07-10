@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -174,10 +175,6 @@ func (e *APIExecutor) RunBenchmark(execInfo *types.APIExecutionInfo, iterations 
 			if err != nil {
 				return nil, fmt.Errorf("discovery failed: %w", err)
 			}
-			// For testing purposes, replace discovered URL
-			if discoveredURL == "http://controlplane-free5gc-ausf-service:80" {
-				discoveredURL = "http://10.96.43.148:80"
-			}
 			fmt.Printf("Discovered %s URL: %s\n", execInfo.NF, discoveredURL)
 			currentExecInfo.DiscoveredURL = discoveredURL
 		}
@@ -245,6 +242,7 @@ func (e *APIExecutor) RunBenchmark(execInfo *types.APIExecutionInfo, iterations 
 			errorType := fmt.Sprintf("Error: %v", err)
 			errorDistribution[errorType]++
 			fmt.Printf("Request %d failed: %v\n", requestCount, err)
+			os.Exit(1)
 		} else {
 			successCount++
 			fmt.Printf("Request %d completed in %v\n", requestCount, execDuration)
@@ -385,11 +383,6 @@ func (e *APIExecutor) RunConcurrentBenchmark(execInfo *types.APIExecutionInfo, c
 							ResponseBody: "",
 						}
 						continue
-					}
-
-					// For testing purposes, replace discovered URL
-					if discoveredURL == "http://controlplane-free5gc-ausf-service:80" {
-						discoveredURL = "http://10.96.43.148:80"
 					}
 				}
 
