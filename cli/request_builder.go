@@ -21,10 +21,10 @@ var (
 	// Global cache for once_before_benchmark chains
 	onceBenchmarkCache = make(map[string]*types.ChainExecutionResult)
 
-	// 체인 구성 확인 결과 캐싱을 위한 새 캐시
+	// New cache for chain configuration validation results
 	chainConfigCache = make(map[string]*types.APIChainConfig)
 
-	// API 실행 정보 캐시 (벤치마크에서 재사용)
+	// API execution info cache (for reuse in benchmarks)
 	preparedAPICache = make(map[string]*types.APIExecutionInfo)
 )
 
@@ -35,28 +35,37 @@ func NewRequestBuilder() *RequestBuilder {
 
 // PrepareAPIExecution prepares API execution info from configuration with detailed validation
 func (rb *RequestBuilder) PrepareAPIExecution(apiList types.APIList, config map[string]interface{}, nf, apiName string) (*types.APIExecutionInfo, error) {
-	// 캐시 키 생성
+	// Check for before_each_call chain type
+	chainConfig, _ := GetAPIChainConfig(config, apiName)
+
+	// For before_each_call chain type, always prepare fresh execution (no caching)
+	if chainConfig != nil && chainConfig.ChainType == "before_each_call" {
+		fmt.Printf("Preparing fresh API execution for before_each_call: %s_%s\n", nf, apiName)
+		return rb.PrepareAPIExecutionWithChainFlag(apiList, config, nf, apiName, false)
+	}
+
+	// Use cache for other cases
 	cacheKey := fmt.Sprintf("%s_%s_prepared", nf, apiName)
 
-	// 이미 준비된 API 정보가 있는지 확인
+	// Check if API info is already prepared
 	if cachedInfo, exists := preparedAPICache[cacheKey]; exists {
-		fmt.Printf("🔄 Using cached prepared API info for %s_%s\n", nf, apiName)
+		fmt.Printf("Using cached prepared API info for %s_%s\n", nf, apiName)
 		return cachedInfo, nil
 	}
 
-	// 없으면 새로 준비
-	result, err := rb.prepareAPIExecutionWithChainFlag(apiList, config, nf, apiName, false)
+	// Prepare new execution info
+	result, err := rb.PrepareAPIExecutionWithChainFlag(apiList, config, nf, apiName, false)
 	if err != nil {
 		return nil, err
 	}
 
-	// 성공적으로 준비된 정보 캐싱
+	// Cache the prepared info
 	preparedAPICache[cacheKey] = result
 	return result, nil
 }
 
-// Internal method with chain prevention flag
-func (rb *RequestBuilder) prepareAPIExecutionWithChainFlag(apiList types.APIList, config map[string]interface{}, nf, apiName string, skipChain bool) (*types.APIExecutionInfo, error) {
+// PrepareAPIExecutionWithChainFlag prepares API execution with chain prevention flag
+func (rb *RequestBuilder) PrepareAPIExecutionWithChainFlag(apiList types.APIList, config map[string]interface{}, nf, apiName string, skipChain bool) (*types.APIExecutionInfo, error) {
 	fmt.Printf("Starting PrepareAPIExecution for NF=%s, API=%s, skipChain=%v\n", nf, apiName, skipChain)
 
 	apiInfo, servicePath, err := rb.GetAPIInfoWithServicePath(apiList, nf, apiName)
@@ -74,10 +83,10 @@ func (rb *RequestBuilder) prepareAPIExecutionWithChainFlag(apiList types.APIList
 
 	// Check if this API has chain configuration ONLY if not skipping chain
 	if !skipChain {
-		// 체인 구성 캐시 키 생성
+		// Generate chain configuration cache key
 		cacheKey := fmt.Sprintf("%s_%s_config", nf, apiName)
 
-		// 캐시에서 먼저 확인
+		// Check cache first
 		if cachedConfig, exists := chainConfigCache[cacheKey]; exists {
 			chainConfig = cachedConfig
 			if chainConfig != nil {
@@ -86,14 +95,14 @@ func (rb *RequestBuilder) prepareAPIExecutionWithChainFlag(apiList types.APIList
 				fmt.Printf("Prerequisite API: %s\n", chainConfig.PrerequisiteAPI)
 			}
 		} else {
-			// 캐시에 없으면 확인하고 저장
+			// If not in cache, check and save
 			chainConfig, err = GetAPIChainConfig(config, apiName)
 			if err != nil {
 				fmt.Printf("Error getting chain config: %v\n", err)
 				return nil, fmt.Errorf("failed to get chain config: %w", err)
 			}
 
-			// 결과 캐싱 (nil도 캐싱)
+			// Cache result (including nil)
 			chainConfigCache[cacheKey] = chainConfig
 
 			if chainConfig == nil {
@@ -126,8 +135,16 @@ func (rb *RequestBuilder) prepareAPIExecutionWithChainFlag(apiList types.APIList
 					onceBenchmarkCache[chainCacheKey] = chainResult
 					fmt.Printf("Prerequisite API completed and cached\n")
 				}
+			} else if chainConfig.ChainType == "before_each_call" {
+				fmt.Printf("Executing before_each_call prerequisite API (no caching)\n")
+				// Execute prerequisite API fresh for each call
+				chainResult, err = rb.executePrerequisiteAPI(chainConfig, config, apiList)
+				if err != nil {
+					return nil, fmt.Errorf("prerequisite API execution failed: %w", err)
+				}
+				fmt.Printf("Prerequisite API completed for before_each_call\n")
 			} else {
-				// Execute prerequisite API first (normal chains)
+				// Execute prerequisite API first (normal chains - backward compatibility)
 				chainResult, err = rb.executePrerequisiteAPI(chainConfig, config, apiList)
 				if err != nil {
 					return nil, fmt.Errorf("prerequisite API execution failed: %w", err)
@@ -246,11 +263,29 @@ func (rb *RequestBuilder) prepareAPIExecutionWithChainFlag(apiList types.APIList
 				}
 			}
 
-			// Required field validation
+			// Required field validation - skip for before_each_call when skipChain is true
 			if fieldValue == nil || fieldValue == "" {
-				fmt.Printf("Required request body field '%s' is empty or missing\n", fieldName)
-				fmt.Printf("Please fill the 'value' field for '%s' in configuration.yaml under '%s' schema\n", fieldName, schemaName)
-				return nil, fmt.Errorf("required request body field '%s' is empty or missing (check configuration.yaml)", fieldName)
+				// Check if this is a before_each_call chain type being skipped
+				if skipChain {
+					// Check if we have a chain configuration
+					if chainConfig, _ := GetAPIChainConfig(config, apiName); chainConfig != nil && chainConfig.ChainType == "before_each_call" {
+						// Check if this field has a response mapping (will be filled by chain)
+						if chainConfig.ResponseMapping != nil && chainConfig.ResponseMapping.RequestBody != nil {
+							if _, hasMapping := chainConfig.ResponseMapping.RequestBody[fieldName]; hasMapping {
+								// This field will be filled by chain execution, use placeholder
+								fieldValue = "PLACEHOLDER_FOR_CHAIN_EXECUTION"
+								fmt.Printf("Using placeholder for field '%s' that will be filled by before_each_call chain\n", fieldName)
+							}
+						}
+					}
+				}
+				
+				// If still empty after placeholder check, it's an error
+				if fieldValue == nil || fieldValue == "" {
+					fmt.Printf("Required request body field '%s' is empty or missing\n", fieldName)
+					fmt.Printf("Please fill the 'value' field for '%s' in configuration.yaml under '%s' schema\n", fieldName, schemaName)
+					return nil, fmt.Errorf("required request body field '%s' is empty or missing (check configuration.yaml)", fieldName)
+				}
 			}
 
 			bodyMap[fieldName] = fieldValue
@@ -322,7 +357,7 @@ func (rb *RequestBuilder) executePrerequisiteAPI(chainConfig *types.APIChainConf
 	}
 
 	// Prepare prerequisite API execution WITH CHAIN SKIP FLAG
-	prereqExecInfo, err := rb.prepareAPIExecutionWithChainFlag(apiList, config, prereqNF, prereqAPI, true)
+	prereqExecInfo, err := rb.PrepareAPIExecutionWithChainFlag(apiList, config, prereqNF, prereqAPI, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare prerequisite API execution: %w", err)
 	}

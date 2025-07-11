@@ -16,10 +16,9 @@ import (
 
 // APIExecutor handles API execution and benchmarking
 type APIExecutor struct {
-	Timeout         time.Duration
-	httpClient      *HTTPClient
-	requestBuilder  *RequestBuilder
-	benchmarkRunner *BenchmarkRunner
+	Timeout        time.Duration
+	httpClient     *HTTPClient
+	requestBuilder *RequestBuilder
 }
 
 // RequestResult represents individual request result for concurrent benchmarking
@@ -35,10 +34,9 @@ type RequestResult struct {
 // NewAPIExecutor creates a new API executor
 func NewAPIExecutor(timeout time.Duration) *APIExecutor {
 	return &APIExecutor{
-		Timeout:         timeout,
-		httpClient:      NewHTTPClient(),
-		requestBuilder:  NewRequestBuilder(),
-		benchmarkRunner: NewBenchmarkRunner(),
+		Timeout:        timeout,
+		httpClient:     NewHTTPClient(),
+		requestBuilder: NewRequestBuilder(),
 	}
 }
 
@@ -56,10 +54,22 @@ func (e *APIExecutor) ExecuteAPI(targetNF, apiName string) (*types.APIExecutionI
 		return nil, fmt.Errorf("failed to load configuration: %w", err)
 	}
 
-	// Prepare execution info from api_list and configuration (with required validation)
-	execInfo, err := e.requestBuilder.PrepareAPIExecution(apiList, config, targetNF, apiName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to prepare API execution: %w", err)
+	// Check if this is a before_each_call chain type - skip chain execution in ExecuteAPI
+	chainConfig, _ := GetAPIChainConfig(config, apiName)
+	var execInfo *types.APIExecutionInfo
+	
+	if chainConfig != nil && chainConfig.ChainType == "before_each_call" {
+		// For before_each_call, prepare execution info without chain execution (use placeholders)
+		execInfo, err = e.requestBuilder.PrepareAPIExecutionWithChainFlag(apiList, config, targetNF, apiName, true)
+		if err != nil {
+			return nil, fmt.Errorf("failed to prepare API execution: %w", err)
+		}
+	} else {
+		// For other chain types, prepare execution info with chain execution
+		execInfo, err = e.requestBuilder.PrepareAPIExecution(apiList, config, targetNF, apiName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to prepare API execution: %w", err)
+		}
 	}
 
 	// Get global settings
@@ -160,7 +170,7 @@ func (e *APIExecutor) RunBenchmark(execInfo *types.APIExecutionInfo, iterations 
 	// Benchmark start time
 	benchmarkStartTime := time.Now()
 
-	currentExecInfo := execInfo // 이미 준비된 execInfo 사용
+	currentExecInfo := execInfo // Use already prepared execInfo
 
 	if currentExecInfo.DiscoveredURL == "" {
 		if strings.ToUpper(execInfo.NF) == "NRF" {
@@ -195,7 +205,7 @@ func (e *APIExecutor) RunBenchmark(execInfo *types.APIExecutionInfo, iterations 
 	fmt.Printf("   Discovered URL: %s\n", currentExecInfo.DiscoveredURL)
 	fmt.Printf("   Parameters: %v\n", currentExecInfo.Parameters)
 
-	// 요청 본문 출력
+	// Print request body
 	if reqBody, ok := currentExecInfo.RequestBody.(map[string]interface{}); ok {
 		bodyBytes, _ := json.Marshal(reqBody)
 		fmt.Printf("Request Body: %s\n", string(bodyBytes))
@@ -223,7 +233,41 @@ func (e *APIExecutor) RunBenchmark(execInfo *types.APIExecutionInfo, iterations 
 
 		requestCount++
 
-		execDuration, err := e.ExecuteHTTPCall(currentExecInfo)
+		// Check if this is a before_each_call chain type that needs fresh preparation
+		chainConfig, _ := GetAPIChainConfig(config, execInfo.APIName)
+		var execToUse *types.APIExecutionInfo
+
+		// For before_each_call chain type, prepare fresh execution info for each request
+		if chainConfig != nil && chainConfig.ChainType == "before_each_call" {
+			apiList, err := e.requestBuilder.LoadAPIList()
+			if err != nil {
+				failureCount++
+				errorType := fmt.Sprintf("Error: %v", err)
+				errorDistribution[errorType]++
+				fmt.Printf("Request %d failed to load API list: %v\n", requestCount, err)
+				continue
+			}
+
+			// Prepare fresh execution info with chain execution
+			execToUse, err = e.requestBuilder.PrepareAPIExecution(apiList, config, execInfo.NF, execInfo.APIName)
+			if err != nil {
+				failureCount++
+				errorType := fmt.Sprintf("Error: %v", err)
+				errorDistribution[errorType]++
+				fmt.Printf("Request %d failed to prepare API execution: %v\n", requestCount, err)
+				continue
+			}
+
+			// Setup URL and headers
+			execToUse.DiscoveredURL = currentExecInfo.DiscoveredURL
+			e.requestBuilder.PopulateHeaders(execToUse, execInfo.NF, config)
+			execToUse.FinalURL = e.requestBuilder.BuildFinalURL(execToUse)
+		} else {
+			// Use pre-built execInfo for other chain types
+			execToUse = currentExecInfo
+		}
+
+		execDuration, err := e.ExecuteHTTPCall(execToUse)
 		allDurations = append(allDurations, execDuration)
 		totalTime += execDuration
 
@@ -408,8 +452,52 @@ func (e *APIExecutor) RunConcurrentBenchmark(execInfo *types.APIExecutionInfo, c
 					}
 				}
 
+				// Check if this is a before_each_call chain type that needs fresh preparation
+				chainConfig, _ := GetAPIChainConfig(config, execInfo.APIName)
+				var execToUse *types.APIExecutionInfo
+				
+				if chainConfig != nil && chainConfig.ChainType == "before_each_call" {
+					// For before_each_call, prepare fresh execution info for each request
+					apiList, err := e.requestBuilder.LoadAPIList()
+					if err != nil {
+						results <- &RequestResult{
+							Duration:     0,
+							StatusCode:   0,
+							Error:        fmt.Errorf("failed to load API list: %w", err),
+							WorkerID:     workerID,
+							Timestamp:    time.Now(),
+							ResponseBody: "",
+						}
+						requestCount++
+						continue
+					}
+					
+					// Prepare fresh execution info with chain execution
+					execToUse, err = e.requestBuilder.PrepareAPIExecution(apiList, config, execInfo.NF, execInfo.APIName)
+					if err != nil {
+						results <- &RequestResult{
+							Duration:     0,
+							StatusCode:   0,
+							Error:        fmt.Errorf("failed to prepare API execution: %w", err),
+							WorkerID:     workerID,
+							Timestamp:    time.Now(),
+							ResponseBody: "",
+						}
+						requestCount++
+						continue
+					}
+					
+					// Setup URL and headers
+					execToUse.DiscoveredURL = execInfo.DiscoveredURL
+					e.requestBuilder.PopulateHeaders(execToUse, execInfo.NF, config)
+					execToUse.FinalURL = e.requestBuilder.BuildFinalURL(execToUse)
+				} else {
+					// Use pre-built execInfo for other chain types
+					execToUse = execInfo
+				}
+
 				// Execute request
-				result := e.executeRequestWithClient(execInfo, client, workerID)
+				result := e.executeRequestWithClient(execToUse, client, workerID)
 				results <- result
 				requestCount++
 
@@ -445,7 +533,7 @@ func (e *APIExecutor) RunConcurrentBenchmark(execInfo *types.APIExecutionInfo, c
 func (e *APIExecutor) executeRequestWithClient(execInfo *types.APIExecutionInfo, client *http.Client, workerID int) *RequestResult {
 	start := time.Now()
 
-	// Use pre-built final URL from execInfo
+	// Use provided execution info directly (chain processing is done at caller level)
 	fullURL := execInfo.FinalURL
 
 	var requestBody []byte
@@ -597,7 +685,7 @@ func calculatePercentiles(durations []time.Duration) map[string]time.Duration {
 	}
 }
 
-// calculateTrimmedMeans 전체 수정 - 안전한 버전
+// calculateTrimmedMeans - complete rewrite with safe version
 func calculateTrimmedMeans(durations []time.Duration) map[string]time.Duration {
 	if len(durations) == 0 {
 		return map[string]time.Duration{
@@ -607,7 +695,7 @@ func calculateTrimmedMeans(durations []time.Duration) map[string]time.Duration {
 		}
 	}
 
-	fmt.Printf("🔍 Computing trimmed means from %d samples\n", len(durations))
+	fmt.Printf("Computing trimmed means from %d samples\n", len(durations))
 
 	// Sort durations
 	sortedDurations := make([]time.Duration, len(durations))
@@ -637,11 +725,11 @@ func safeTrimmedMean(sortedDurations []time.Duration, removeRatio float64) time.
 		return 0
 	}
 
-	// 백분위로 계산해서 더 정확한 인덱스 결정
-	startIndex := int(float64(n)*removeRatio + 0.5) // 반올림
+	// Calculate more accurate index based on percentile
+	startIndex := int(float64(n)*removeRatio + 0.5) // Round to nearest
 	endIndex := n - startIndex
 
-	// 최소한 하나는 남겨야 함
+	// At least one element must remain
 	if startIndex >= endIndex {
 		result := calculateAverage(sortedDurations)
 		fmt.Printf("   %.1f%% trimmed: too aggressive, using full average: %v\n",
