@@ -27,12 +27,63 @@ type HTTPResult struct {
 	Error        error
 }
 
-// NewHTTPClient creates a new HTTP/2-only client
+// NewHTTPClient creates a new HTTP client with TLS support based on configuration
 func NewHTTPClient() *HTTPClient {
+	// Load configuration to check TLS settings
+	config, err := LoadConfiguration()
+	if err != nil {
+		// Fallback to h2c if config loading fails
+		return newH2CClient()
+	}
+
+	userInputs, ok := config["user_inputs"].(map[string]interface{})
+	if !ok {
+		return newH2CClient()
+	}
+
+	globalSettings, ok := userInputs["global_settings"].(map[string]interface{})
+	if !ok {
+		return newH2CClient()
+	}
+
+	// Check if TLS is enabled in configuration
+	enableTLS := false
+	if tlsConfig, exists := globalSettings["use_https"]; exists {
+		if tlsBool, ok := tlsConfig.(bool); ok {
+			enableTLS = tlsBool
+		}
+	}
+
+	// Create appropriate client based on TLS setting
+	if enableTLS {
+		return newTLSClient()
+	} else {
+		return newH2CClient()
+	}
+}
+
+// newTLSClient creates HTTP/2 client with TLS support
+func newTLSClient() *HTTPClient {
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: false,
+		},
+	}
+	_ = http2.ConfigureTransport(tr)
+
+	return &HTTPClient{
+		client: &http.Client{
+			Timeout:   30 * time.Second,
+			Transport: tr,
+		},
+	}
+}
+
+// newH2CClient creates HTTP/2 client for plain text (h2c)
+func newH2CClient() *HTTPClient {
 	tr := &http2.Transport{
-		AllowHTTP: true, // HTTP/2 Cleartext (h2c) 허용
+		AllowHTTP: true,
 		DialTLS: func(network, addr string, cfg *tls.Config) (net.Conn, error) {
-			// TLS 없이 일반 TCP 연결 사용
 			return net.Dial(network, addr)
 		},
 	}

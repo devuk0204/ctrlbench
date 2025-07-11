@@ -14,15 +14,15 @@ import (
 
 // BuildConfiguration builds configuration file for specified NFs or all NFs
 func BuildConfiguration(services map[string]types.ServiceMetadata, nfFilters []string) error {
-	fmt.Println("🔧 Building configuration file...")
+	fmt.Println("Building configuration file...")
 
 	if len(nfFilters) == 0 {
 		// Build for all NFs
-		fmt.Println("📋 Building configuration for all Network Functions")
-		return buildConfigurationForAllNFs(services)
+		fmt.Println("Building configuration for all Network Functions")
+		return buildConfigurationForAllNFs(services, nfFilters)
 	} else {
 		// Build for specified NFs
-		fmt.Printf("📋 Building configuration for specified NFs: %v\n", nfFilters)
+		fmt.Printf("Building configuration for specified NFs: %v\n", nfFilters)
 		return buildConfigurationForSpecificNFs(services, nfFilters)
 	}
 }
@@ -51,8 +51,8 @@ func buildConfigurationForSpecificNFs(services map[string]types.ServiceMetadata,
 
 	// Report invalid NFs
 	if len(invalidNFs) > 0 {
-		fmt.Printf("❌ Invalid NFs specified: %v\n", invalidNFs)
-		fmt.Println("📋 Available NFs:")
+		fmt.Printf("Invalid NFs specified: %v\n", invalidNFs)
+		fmt.Println("Available NFs:")
 		for nf := range nfServices {
 			fmt.Printf("   - %s\n", nf)
 		}
@@ -60,7 +60,7 @@ func buildConfigurationForSpecificNFs(services map[string]types.ServiceMetadata,
 	}
 
 	// Build configuration for valid NFs
-	fmt.Printf("✅ Valid NFs found: %v\n", validNFs)
+	fmt.Printf("Valid NFs found: %v\n", validNFs)
 
 	// Filter services for specified NFs
 	filteredServices := make(map[string]types.ServiceMetadata)
@@ -77,7 +77,7 @@ func buildConfigurationForSpecificNFs(services map[string]types.ServiceMetadata,
 	}
 
 	// Write configuration file
-	if err := writeConfigurationFile(config, "configuration.yaml"); err != nil {
+	if err := writeConfigurationFile(config, "configuration.yaml", nfFilters); err != nil {
 		return err
 	}
 
@@ -87,7 +87,7 @@ func buildConfigurationForSpecificNFs(services map[string]types.ServiceMetadata,
 }
 
 // buildConfigurationForAllNFs builds configuration for all available NFs
-func buildConfigurationForAllNFs(services map[string]types.ServiceMetadata) error {
+func buildConfigurationForAllNFs(services map[string]types.ServiceMetadata, nfFilters []string) error {
 	nfServices := GroupServicesByNF(services)
 
 	// Build and write configuration
@@ -95,7 +95,7 @@ func buildConfigurationForAllNFs(services map[string]types.ServiceMetadata) erro
 		UserInputs: buildUserInputSection(nfServices),
 	}
 
-	if err := writeConfigurationFile(config, "configuration.yaml"); err != nil {
+	if err := writeConfigurationFile(config, "configuration.yaml", nfFilters); err != nil {
 		return err
 	}
 
@@ -996,11 +996,11 @@ func writeAPIListFile(apiList types.APIList) error {
 		return fmt.Errorf("failed to write api_list: %w", err)
 	}
 
-	fmt.Printf("✅ API list file created: %s\n", filename)
+	fmt.Printf("API list file created: %s\n", filename)
 	return nil
 }
 
-func writeConfigurationFile(config types.ConfigurationFile, filename string) error {
+func writeConfigurationFile(config types.ConfigurationFile, filename string, nfFilters []string) error {
 	file, err := os.Create(filename)
 	if err != nil {
 		return fmt.Errorf("failed to create configuration file: %w", err)
@@ -1045,12 +1045,20 @@ user_inputs:
 	file.WriteString("  nf_settings:\n")
 	writeYAMLSection(file, config.UserInputs.NFSettings, 4)
 
-	// Write UE credentials separator and section
-	file.WriteString("\n# =============================================================================\n")
-	file.WriteString("# UE CREDENTIALS - 5G-AKA Authentication Parameters\n")
-	file.WriteString("# =============================================================================\n")
-	file.WriteString("  ue_credentials:\n")
-	writeYAMLSection(file, config.UserInputs.UeCredentials, 4)
+	hasAUSF := false
+	for _, nf := range nfFilters {
+		if strings.EqualFold(nf, "AUSF") {
+			hasAUSF = true
+			break
+		}
+	}
+	if hasAUSF {
+		file.WriteString("\n# =============================================================================\n")
+		file.WriteString("# UE CREDENTIALS - 5G-AKA Authentication Parameters\n")
+		file.WriteString("# =============================================================================\n")
+		file.WriteString("  ue_credentials:\n")
+		writeYAMLSection(file, config.UserInputs.UeCredentials, 4)
+	}
 
 	// Write common parameters separator and section
 	file.WriteString("\n# =============================================================================\n")
@@ -1098,7 +1106,7 @@ user_inputs:
 	file.WriteString("  api_chain_configuration:\n")
 	writeYAMLSection(file, config.UserInputs.APIChainConfiguration, 4)
 
-	fmt.Printf("✅ Configuration file created: %s\n", filename)
+	fmt.Printf("Configuration file created: %s\n", filename)
 	return nil
 }
 

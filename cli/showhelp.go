@@ -65,7 +65,7 @@ func ShowHelp(services map[string]types.ServiceMetadata, nfFilter string) {
 }
 
 func showAllNFs(services map[string]types.ServiceMetadata) {
-	fmt.Println("📋 Available Network Functions (NFs)")
+	fmt.Println("Available Network Functions (NFs)")
 	fmt.Println(strings.Repeat("=", 50))
 
 	nfServices := GroupServicesByNF(services)
@@ -78,14 +78,14 @@ func showAllNFs(services map[string]types.ServiceMetadata) {
 			totalAPIs += len(service.APIs)
 		}
 
-		fmt.Printf("📁 %s (%d services, %d APIs)\n", nf, len(serviceList), totalAPIs)
+		fmt.Printf("%s (%d services, %d APIs)\n", nf, len(serviceList), totalAPIs)
 	}
 
-	fmt.Println("\n💡 Use -h NF_NAME to see detailed APIs for a specific NF")
+	fmt.Println("\nUse -h NF_NAME to see detailed APIs for a specific NF")
 }
 
 func showSpecificNF(services map[string]types.ServiceMetadata, nfFilter string) {
-	fmt.Printf("📋 APIs for NF: %s\n", strings.ToUpper(nfFilter))
+	fmt.Printf("APIs for NF: %s\n", strings.ToUpper(nfFilter))
 	fmt.Println(strings.Repeat("=", 50))
 
 	nfServices := GroupServicesByNF(services)
@@ -99,23 +99,23 @@ func showSpecificNF(services map[string]types.ServiceMetadata, nfFilter string) 
 	}
 
 	if len(matchedServices) == 0 {
-		fmt.Printf("❌ No services found for NF: %s\n", nfFilter)
+		fmt.Printf("No services found for NF: %s\n", nfFilter)
 		return
 	}
 
 	for _, service := range matchedServices {
 		servicePath := ExtractServicePath(service)
 
-		fmt.Printf("📂 %s [%s]\n", CleanServiceName(service.Name), servicePath)
+		fmt.Printf("%s [%s]\n", CleanServiceName(service.Name), servicePath)
 
 		apiNames := GetSortedKeys(service.APIs)
 		for _, apiName := range apiNames {
 			api := service.APIs[apiName]
 			method := GetMethodFromOpenAPISpec(api, service, apiName)
 
-			fmt.Printf("    📄 %s\n", apiName)
-			fmt.Printf("        Method: %s\n", method)
-			fmt.Printf("        Path: %s\n", api.Path)
+			fmt.Printf("    %s\n", apiName)
+			fmt.Printf("      Method: %s\n", method)
+			fmt.Printf("      Path: %s\n", api.Path)
 
 			// Show only required parameters
 			requiredParams := getRequiredParameters(api, service)
