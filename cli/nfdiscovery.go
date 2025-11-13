@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/devuk0204/ctrlbench/types"
+	"golang.org/x/net/http2"
 )
 
 type NFDiscoveryClient struct {
@@ -18,10 +19,14 @@ type NFDiscoveryClient struct {
 }
 
 func NewNFDiscoveryClient(nrfURL string, timeout time.Duration) *NFDiscoveryClient {
+	transport := &http.Transport{}
+	http2.ConfigureTransport(transport)
+
 	return &NFDiscoveryClient{
 		NRFURL: TrimSlashRight(nrfURL),
 		HTTPClient: &http.Client{
-			Timeout: timeout,
+			Timeout:   timeout,
+			Transport: transport,
 		},
 	}
 }
