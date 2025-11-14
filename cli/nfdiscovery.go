@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -19,8 +21,12 @@ type NFDiscoveryClient struct {
 }
 
 func NewNFDiscoveryClient(nrfURL string, timeout time.Duration) *NFDiscoveryClient {
-	transport := &http.Transport{}
-	http2.ConfigureTransport(transport)
+	transport := &http2.Transport{
+		AllowHTTP: true,
+		DialTLS: func(network, addr string, cfg *tls.Config) (net.Conn, error) {
+			return net.Dial(network, addr)
+		},
+	}
 
 	return &NFDiscoveryClient{
 		NRFURL: TrimSlashRight(nrfURL),
