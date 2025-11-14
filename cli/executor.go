@@ -2,9 +2,11 @@ package cli
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"sort"
 	"strings"
@@ -12,6 +14,7 @@ import (
 	"time"
 
 	"github.com/devuk0204/ctrlbench/types"
+	"golang.org/x/net/http2"
 )
 
 // APIExecutor handles API execution and benchmarking
@@ -432,13 +435,17 @@ func (e *APIExecutor) RunConcurrentBenchmark(execInfo *types.APIExecutionInfo, c
 		go func(workerID int) {
 			defer wg.Done()
 
-			client := &http.Client{
-				Timeout: e.Timeout,
-				Transport: &http.Transport{
-					MaxIdleConns:        10,
-					MaxIdleConnsPerHost: 10,
-					IdleConnTimeout:     30 * time.Second,
+			// Use HTTP/2 transport (h2c - HTTP/2 without TLS)
+			transport := &http2.Transport{
+				AllowHTTP: true,
+				DialTLS: func(network, addr string, cfg *tls.Config) (net.Conn, error) {
+					return net.Dial(network, addr)
 				},
+			}
+
+			client := &http.Client{
+				Timeout:   e.Timeout,
+				Transport: transport,
 			}
 
 			requestCount := 0
