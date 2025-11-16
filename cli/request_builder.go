@@ -174,12 +174,59 @@ func (rb *RequestBuilder) PrepareAPIExecutionWithChainFlag(apiList types.APIList
 				var extractedValue interface{}
 				var err error
 
-				// First check if it's a special computed value (like resStar)
+				// First check if it's a special computed value
 				if chainResult.ExtractedData != nil {
-					if val, exists := chainResult.ExtractedData[mappedValue]; exists {
-						extractedValue = val
-						err = nil
-					} else {
+					fmt.Printf("ExtractedData available for parameter '%s', contents:\n", p.Name)
+					for key, value := range chainResult.ExtractedData {
+						fmt.Printf("%s: %v\n", key, value)
+					}
+
+					// Remove JSONPath prefix (e.g., "$." or "$['']") to get base key name
+					baseKey := mappedValue
+					baseKey = strings.TrimPrefix(baseKey, "$.")
+					baseKey = strings.TrimPrefix(baseKey, "$['")
+					baseKey = strings.TrimSuffix(baseKey, "']")
+
+					// Try multiple possible keys - original, lowercase, uppercase, snake_case, camelCase
+					possibleKeys := []string{baseKey}
+					if baseKey != mappedValue {
+						possibleKeys = append(possibleKeys, mappedValue)
+					}
+
+					// Add common variations
+					lower := strings.ToLower(baseKey)
+					if lower != baseKey {
+						possibleKeys = append(possibleKeys, lower)
+					}
+
+					upper := strings.ToUpper(baseKey)
+					if upper != baseKey {
+						possibleKeys = append(possibleKeys, upper)
+					}
+
+					// Convert camelCase to snake_case
+					var snakeBuilder strings.Builder
+					for i, r := range baseKey {
+						if i > 0 && r >= 'A' && r <= 'Z' {
+							snakeBuilder.WriteRune('_')
+						}
+						snakeBuilder.WriteRune(r)
+					}
+					snake := strings.ToLower(snakeBuilder.String())
+					if snake != baseKey && snake != lower {
+						possibleKeys = append(possibleKeys, snake)
+					}
+
+					for _, key := range possibleKeys {
+						if val, exists := chainResult.ExtractedData[key]; exists {
+							extractedValue = val
+							err = nil
+							fmt.Printf("Found value using key '%s': %v\n", key, val)
+							break
+						}
+					}
+
+					if extractedValue == nil {
 						// Fallback to JSONPath extraction
 						extractedValue, err = ExtractValueFromResponse(chainResult.ResponseBody, mappedValue)
 					}
@@ -418,7 +465,7 @@ func (rb *RequestBuilder) executePrerequisiteAPI(chainConfig *types.APIChainConf
 		strings.Contains(strings.ToLower(chainConfig.PrerequisiteAPI), "authentication") {
 		fmt.Printf("Detected PostUeAuthentications - computing resStar\n")
 
-		resStar, err := rb.computeResStar(string(result.ResponseBody), config)
+		resStar, authCtxId, err := rb.computeResStar(string(result.ResponseBody), config)
 		if err != nil {
 			fmt.Printf("Failed to compute resStar: %v\n", err)
 		} else {
@@ -427,7 +474,9 @@ func (rb *RequestBuilder) executePrerequisiteAPI(chainConfig *types.APIChainConf
 				chainResult.ExtractedData = make(map[string]interface{})
 			}
 			chainResult.ExtractedData["resStar"] = hex.EncodeToString(resStar)
+			chainResult.ExtractedData["authCtxId"] = authCtxId
 			fmt.Printf("Computed resStar: %s\n", hex.EncodeToString(resStar))
+			fmt.Printf("Auth Context ID: %s\n", authCtxId)
 		}
 	}
 
@@ -648,16 +697,16 @@ func GetDefaultRequestBodyForType(bodyType string) interface{} {
 	}
 }
 
-func (rb *RequestBuilder) computeResStar(responseBody string, config map[string]interface{}) ([]byte, error) {
+func (rb *RequestBuilder) computeResStar(responseBody string, config map[string]interface{}) ([]byte, string, error) {
 	var authResponse map[string]interface{}
 	if err := json.Unmarshal([]byte(responseBody), &authResponse); err != nil {
-		return nil, fmt.Errorf("failed to parse authentication response: %w", err)
+		return nil, "", fmt.Errorf("failed to parse authentication response: %w", err)
 	}
 
 	// Extract data from response
 	authData, ok := authResponse["5gAuthData"].(map[string]interface{})
 	if !ok {
-		return nil, fmt.Errorf("5gAuthData not found in authentication response")
+		return nil, "", fmt.Errorf("5gAuthData not found in authentication response")
 	}
 
 	randStr, _ := authData["rand"].(string)
@@ -666,12 +715,12 @@ func (rb *RequestBuilder) computeResStar(responseBody string, config map[string]
 
 	rand, err := hex.DecodeString(randStr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode RAND: %w", err)
+		return nil, "", fmt.Errorf("failed to decode RAND: %w", err)
 	}
 
 	autn, err := hex.DecodeString(autnStr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode AUTN: %w", err)
+		return nil, "", fmt.Errorf("failed to decode AUTN: %w", err)
 	}
 
 	// Get credentials from config
@@ -680,15 +729,16 @@ func (rb *RequestBuilder) computeResStar(responseBody string, config map[string]
 
 	kStr, _ := GetConfigString(ueCredentials["k"])
 	opcStr, _ := GetConfigString(ueCredentials["opc"])
+	coreVendor, _ := GetConfigString(ueCredentials["core_vendor"])
 
 	k, err := hex.DecodeString(kStr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode K: %w", err)
+		return nil, "", fmt.Errorf("failed to decode K: %w", err)
 	}
 
 	opc, err := hex.DecodeString(opcStr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode OPc: %w", err)
+		return nil, "", fmt.Errorf("failed to decode OPc: %w", err)
 	}
 
 	// Create UEAuth instance - let PerformUEAuth handle SQN/AMF extraction
@@ -698,13 +748,37 @@ func (rb *RequestBuilder) computeResStar(responseBody string, config map[string]
 		RAND:        rand,
 		AUTN:        autn,
 		ServingName: servingNetworkName,
+		CoreVendor:  coreVendor,
 	}
 
 	if err := ueAuth.CalculateResStar(); err != nil {
-		return nil, fmt.Errorf("failed to perform UE authentication: %w", err)
+		return nil, "", fmt.Errorf("failed to perform UE authentication: %w", err)
 	}
 
 	fmt.Printf("Computed XRES* (resStar): %s\n", hex.EncodeToString(ueAuth.ResStar))
 
-	return ueAuth.ResStar, nil
+	// Extract Auth Context ID if available
+	authCtxId := ""
+	_links, ok := authResponse["_links"].(map[string]interface{})
+	if !ok {
+		return nil, "", fmt.Errorf("_links not found in authentication response")
+	}
+	akaLink, ok := _links["5G_AKA"].(map[string]interface{})
+	if !ok {
+		return nil, "", fmt.Errorf("5G_AKA link not found in _links")
+	}
+	href, ok := akaLink["href"].(string)
+	if !ok {
+		return nil, "", fmt.Errorf("href not found in 5G_AKA link")
+	}
+	// Extract Auth Context ID from href URL
+	parts := strings.Split(href, "/")
+	if len(parts) < 1 {
+		return nil, "", fmt.Errorf("invalid href format for extracting Auth Context ID")
+	}
+	authCtxId = parts[len(parts)-2] // Assuming the ID is the second last segment
+
+	fmt.Printf("Extracted Auth Context ID: %s\n", authCtxId)
+
+	return ueAuth.ResStar, authCtxId, nil
 }

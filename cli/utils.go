@@ -366,7 +366,7 @@ func ApplyResponseMapping(execInfo *types.APIExecutionInfo, chainResult *types.C
 		return nil // No mapping or no response to map
 	}
 
-	fmt.Printf("🔗 Applying response mapping from prerequisite API\n")
+	fmt.Printf("Applying response mapping from prerequisite API\n")
 
 	// Extract values from response
 	extractedData := make(map[string]interface{})
@@ -375,7 +375,7 @@ func ApplyResponseMapping(execInfo *types.APIExecutionInfo, chainResult *types.C
 	for paramName, jsonPath := range mapping.Parameters {
 		value, err := ExtractValueFromResponse(chainResult.ResponseBody, jsonPath)
 		if err != nil {
-			fmt.Printf("⚠️  Failed to extract parameter %s from path %s: %v\n", paramName, jsonPath, err)
+			fmt.Printf("Failed to extract parameter %s from path %s: %v\n", paramName, jsonPath, err)
 			continue
 		}
 
@@ -386,14 +386,14 @@ func ApplyResponseMapping(execInfo *types.APIExecutionInfo, chainResult *types.C
 		execInfo.Parameters[paramName] = fmt.Sprintf("%v", value)
 		extractedData[paramName] = value
 
-		fmt.Printf("🔗 Mapped parameter %s: %v\n", paramName, value)
+		fmt.Printf("Mapped parameter %s: %v\n", paramName, value)
 	}
 
 	// Map headers
 	for headerName, jsonPath := range mapping.Headers {
 		value, err := ExtractValueFromResponse(chainResult.ResponseBody, jsonPath)
 		if err != nil {
-			fmt.Printf("⚠️  Failed to extract header %s from path %s: %v\n", headerName, jsonPath, err)
+			fmt.Printf("Failed to extract header %s from path %s: %v\n", headerName, jsonPath, err)
 			continue
 		}
 
@@ -404,7 +404,7 @@ func ApplyResponseMapping(execInfo *types.APIExecutionInfo, chainResult *types.C
 		execInfo.Headers[headerName] = fmt.Sprintf("%v", value)
 		extractedData[headerName] = value
 
-		fmt.Printf("🔗 Mapped header %s: %v\n", headerName, value)
+		fmt.Printf("Mapped header %s: %v\n", headerName, value)
 	}
 
 	// Map request body fields
@@ -416,7 +416,7 @@ func ApplyResponseMapping(execInfo *types.APIExecutionInfo, chainResult *types.C
 		case string:
 			if rb != "" {
 				if err := json.Unmarshal([]byte(rb), &bodyMap); err != nil {
-					fmt.Printf("⚠️  Failed to parse existing request body string: %v\n", err)
+					fmt.Printf("Failed to parse existing request body string: %v\n", err)
 					return nil
 				}
 			} else {
@@ -428,7 +428,7 @@ func ApplyResponseMapping(execInfo *types.APIExecutionInfo, chainResult *types.C
 			// Try to marshal and unmarshal to get a map
 			if bodyBytes, err := json.Marshal(execInfo.RequestBody); err == nil {
 				if err := json.Unmarshal(bodyBytes, &bodyMap); err != nil {
-					fmt.Printf("⚠️  Failed to convert request body to map: %v\n", err)
+					fmt.Printf("Failed to convert request body to map: %v\n", err)
 					return nil
 				}
 			} else {
@@ -440,7 +440,7 @@ func ApplyResponseMapping(execInfo *types.APIExecutionInfo, chainResult *types.C
 		for bodyField, jsonPath := range mapping.RequestBody {
 			value, err := ExtractValueFromResponse(chainResult.ResponseBody, jsonPath)
 			if err != nil {
-				fmt.Printf("⚠️  Failed to extract request body field %s from path %s: %v\n", bodyField, jsonPath, err)
+				fmt.Printf("Failed to extract request body field %s from path %s: %v\n", bodyField, jsonPath, err)
 				continue
 			}
 
@@ -448,7 +448,7 @@ func ApplyResponseMapping(execInfo *types.APIExecutionInfo, chainResult *types.C
 			setNestedField(bodyMap, bodyField, value)
 			extractedData[bodyField] = value
 
-			fmt.Printf("🔗 Mapped request body field %s: %v\n", bodyField, value)
+			fmt.Printf("Mapped request body field %s: %v\n", bodyField, value)
 		}
 
 		// Update request body back to the original type

@@ -255,6 +255,13 @@ func buildUeCrendentialsSection() map[string]interface{} {
 				"type":        "string",
 				"value":       "OPC",
 			},
+			"core_vendor": map[string]interface{}{
+				"description": "Core network vendor",
+				"example":     "oai",
+				"required":    true,
+				"type":        "string",
+				"value":       "oai",
+			},
 		},
 	}
 }

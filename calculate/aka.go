@@ -20,6 +20,7 @@ type UEAuth struct {
 	RAND        []byte
 	AUTN        []byte
 	ServingName string
+	CoreVendor  string
 
 	// 결과값들
 	RES      []byte
@@ -31,12 +32,23 @@ type UEAuth struct {
 	HResStar []byte // HXRES* - free5gc uses this name
 }
 
-// CalculateResStar - Calculate free5gc resStar vector (XRES*)
+// CalculateResStar - Calculate resStar vector (XRES*)
 func (u *UEAuth) CalculateResStar() error {
-	fmt.Printf("========== FREE5GC RESSTAR CALCULATION ==========\n")
+	fmt.Printf("========== RESSTAR CALCULATION ==========\n")
+
+	// Handle serving network name based on core vendor
+	if strings.ToLower(u.CoreVendor) == "free5gc" {
+		if idx := strings.Index(u.ServingName, ":"); idx >= 0 {
+			u.ServingName = u.ServingName[idx+1:]
+			fmt.Printf("Core Vendor: free5gc, ServingNetworkName (prefix removed): %s\n", u.ServingName)
+		}
+	} else {
+		fmt.Printf("Core Vendor: %s, ServingNetworkName (as-is): %s\n", u.CoreVendor, u.ServingName)
+	}
 
 	// Validate input parameters
 	if len(u.K) != 16 || len(u.OPc) != 16 || len(u.RAND) != 16 || len(u.AUTN) != 16 {
+		fmt.Printf("Invalid input parameter lengths: K=%d, OPc=%d, RAND=%d, AUTN=%d\n", len(u.K), len(u.OPc), len(u.RAND), len(u.AUTN))
 		return errors.New("invalid input parameter lengths")
 	}
 
@@ -178,7 +190,7 @@ func (u *UEAuth) deriveHResStar() []byte {
 }
 
 // CalculateResStarWrapper - Wrapper function to match your existing code
-func CalculateResStar(opcStr, kStr string, rand, autn []byte, servingNetworkName string) (resStar, hresStar, ckPrime, ikPrime []byte, err error) {
+func CalculateResStar(opcStr, kStr string, rand, autn []byte, servingNetworkName, coreVendor string) (resStar, hresStar, ckPrime, ikPrime []byte, err error) {
 	// Decode OPc and K from hex strings
 	opc, err := hex.DecodeString(opcStr)
 	if err != nil {
@@ -190,11 +202,6 @@ func CalculateResStar(opcStr, kStr string, rand, autn []byte, servingNetworkName
 		return nil, nil, nil, nil, fmt.Errorf("failed to decode K: %w", err)
 	}
 
-	// Remove "5G:" prefix from serving network name if present
-	if idx := strings.Index(servingNetworkName, ":"); idx >= 0 {
-		servingNetworkName = servingNetworkName[idx+1:]
-	}
-
 	// Create UEAuth instance
 	ueAuth := &UEAuth{
 		K:           k,
@@ -202,6 +209,7 @@ func CalculateResStar(opcStr, kStr string, rand, autn []byte, servingNetworkName
 		RAND:        rand,
 		AUTN:        autn,
 		ServingName: servingNetworkName,
+		CoreVendor:  coreVendor,
 	}
 
 	// Calculate RES*
@@ -246,49 +254,4 @@ func KDFLen(p []byte) []byte {
 	length := make([]byte, 2)
 	binary.BigEndian.PutUint16(length, uint16(len(p)))
 	return length
-}
-
-// DebugCompareWithExpected - Compare our results with expected values
-func (u *UEAuth) DebugCompareWithExpected(expectedResStar, expectedHResStar string) {
-	fmt.Printf("\n🔐 ========== DEBUG COMPARISON ==========\n")
-
-	// The free5gc logs show hex-encoded strings, not double-encoded
-	// So we just compare directly
-	fmt.Printf("🔐 Expected RES*: %s\n", expectedResStar)
-	fmt.Printf("🔐 Our RES*:      %s\n", hex.EncodeToString(u.ResStar))
-
-	if expectedResStar == hex.EncodeToString(u.ResStar) {
-		fmt.Printf("🔐 ✅ RES* MATCHES!\n")
-	} else {
-		fmt.Printf("🔐 ❌ RES* MISMATCH\n")
-
-		// Try to decode in case it's double-encoded
-		if decoded, err := hex.DecodeString(expectedResStar); err == nil {
-			decodedStr := string(decoded)
-			fmt.Printf("🔐 Expected RES* (decoded as ASCII): %s\n", decodedStr)
-
-			if decodedStr == hex.EncodeToString(u.ResStar) {
-				fmt.Printf("🔐 ✅ RES* MATCHES after decoding!\n")
-			}
-		}
-	}
-
-	fmt.Printf("\n🔐 Expected HRES*: %s\n", expectedHResStar)
-	fmt.Printf("🔐 Our HRES*:      %s\n", hex.EncodeToString(u.HResStar))
-
-	if expectedHResStar == hex.EncodeToString(u.HResStar) {
-		fmt.Printf("🔐 ✅ HRES* MATCHES!\n")
-	} else {
-		fmt.Printf("🔐 ❌ HRES* MISMATCH\n")
-
-		// Try to decode in case it's double-encoded
-		if decoded, err := hex.DecodeString(expectedHResStar); err == nil {
-			decodedStr := string(decoded)
-			fmt.Printf("🔐 Expected HRES* (decoded as ASCII): %s\n", decodedStr)
-
-			if decodedStr == hex.EncodeToString(u.HResStar) {
-				fmt.Printf("🔐 ✅ HRES* MATCHES after decoding!\n")
-			}
-		}
-	}
 }
